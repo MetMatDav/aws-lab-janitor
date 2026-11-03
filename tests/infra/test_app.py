@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -46,3 +47,16 @@ def test_resources_keep_the_project_tags(cli_template: dict):
     queue = next(r for r in cli_template["Resources"].values() if r["Type"] == "AWS::SQS::Queue")
     assert {"Key": "Project", "Value": "aws-lab-janitor"} in queue["Properties"]["Tags"]
     assert {"Key": "ManagedBy", "Value": "cdk"} in queue["Properties"]["Tags"]
+
+
+def test_cli_outputs_are_stack_level_and_carry_no_email(cli_template: dict):
+    # The CLI synthesis uses its own email domains, so a leak would show here
+    # even if the unit-test emails changed.
+    outputs = cli_template["Outputs"]
+    assert set(outputs) == {
+        "StateMachineArn",
+        "PlansBucketName",
+        "AuditTableName",
+        "ApprovalApiUrl",
+    }
+    assert "@" not in json.dumps(outputs)

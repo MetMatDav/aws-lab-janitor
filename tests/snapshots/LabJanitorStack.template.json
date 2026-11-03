@@ -1,17 +1,25 @@
 {
   "Description": "Lab janitor: weekly sweep of lab leftovers with plan, approval and audit trail",
   "Outputs": {
-    "WorkflowAuditTableNameE7DE7067": {
+    "ApprovalApiUrl": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ApprovalApi8A7EAF8B",
+          "ApiEndpoint"
+        ]
+      }
+    },
+    "AuditTableName": {
       "Value": {
         "Ref": "AuditTable18A3095C"
       }
     },
-    "WorkflowPlansBucketNameE29204CC": {
+    "PlansBucketName": {
       "Value": {
         "Ref": "AuditPlansBucketDEC41664"
       }
     },
-    "WorkflowStateMachineArn73E0F973": {
+    "StateMachineArn": {
       "Value": {
         "Ref": "WorkflowStateMachine8F1B1C15"
       }
@@ -2011,14 +2019,14 @@
                   "Arn"
                 ]
               },
-              "\",\"Parameters\":{\"config.$\":\"$.config\"}},\"HasCandidates\":{\"Type\":\"Choice\",\"Choices\":[{\"And\":[{\"Variable\":\"$.config.dryRun\",\"IsPresent\":true},{\"Variable\":\"$.config.dryRun\",\"BooleanEquals\":false},{\"Variable\":\"$.detect.candidateCount\",\"NumericGreaterThan\":0}],\"Next\":\"ApprovalNotYetImplemented\"}],\"Default\":\"NotifyReportOnly\"},\"NotifyReportOnly\":{\"End\":true,\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"Resource\":\"",
+              "\",\"Parameters\":{\"config.$\":\"$.config\"}},\"HasCandidates\":{\"Type\":\"Choice\",\"Choices\":[{\"And\":[{\"Variable\":\"$.config.dryRun\",\"IsPresent\":true},{\"Variable\":\"$.config.dryRun\",\"BooleanEquals\":false},{\"Variable\":\"$.detect.candidateCount\",\"NumericGreaterThan\":0}],\"Next\":\"NewApprovalId\"}],\"Default\":\"NotifyReportOnly\"},\"NotifyReportOnly\":{\"End\":true,\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"Resource\":\"",
               {
                 "Fn::GetAtt": [
                   "NotifierFunctionAF3DBB87",
                   "Arn"
                 ]
               },
-              "\",\"Parameters\":{\"mode\":\"report\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\"}},\"ApprovalNotYetImplemented\":{\"Type\":\"Pass\",\"Next\":\"NotifyReportOnly\"},\"NotifyFailure\":{\"Next\":\"RunFailed\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              "\",\"Parameters\":{\"mode\":\"report\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\"}},\"NotifyFailure\":{\"Next\":\"RunFailed\",\"Type\":\"Task\",\"Resource\":\"arn:",
               {
                 "Ref": "AWS::Partition"
               },
@@ -2026,7 +2034,86 @@
               {
                 "Ref": "NotificationsAlertsTopicDFE3487E"
               },
-              "\",\"Message.$\":\"States.Format('Execution {} failed with {}: {}', $$.Execution.Id, $.error.Error, $.error.Cause)\",\"Subject\":\"[Lab Janitor] Run failed\"}},\"RunFailed\":{\"Type\":\"Fail\"}},\"TimeoutSeconds\":7200}"
+              "\",\"Message.$\":\"States.Format('Execution {} failed: {}', $$.Execution.Id, States.JsonToString($.error))\",\"Subject\":\"[Lab Janitor] Run failed\"}},\"NotifyRejected\":{\"Next\":\"Rejected\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":null,\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "NotifierFunctionAF3DBB87",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"mode\":\"rejected\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\",\"error.$\":\"$.error\"}},\"MirrorRejected\":{\"Next\":\"NotifyRejected\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::dynamodb:putItem\",\"Parameters\":{\"TableName\":\"",
+              {
+                "Ref": "AuditTable18A3095C"
+              },
+              "\",\"Item\":{\"pk\":{\"S.$\":\"States.Format('RUN#{}', $.detect.runId)\"},\"sk\":{\"S.$\":\"States.Format('APPROVAL#{}', $.approvalRequest.approvalId)\"},\"event\":{\"S\":\"REJECTED\"},\"at\":{\"S.$\":\"$$.State.EnteredTime\"},\"actor\":{\"S\":\"statemachine\"},\"detail\":{\"S.$\":\"States.JsonToString($.error)\"}},\"ConditionExpression\":\"attribute_not_exists(pk) AND attribute_not_exists(sk)\"},\"ResultPath\":\"$.recordResult\",\"Catch\":[{\"ErrorEquals\":[\"DynamoDB.ConditionalCheckFailedException\"],\"ResultPath\":\"$.recordError\",\"Next\":\"NotifyRejected\"}]},\"RecordRejected\":{\"Next\":\"MirrorRejected\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::dynamodb:updateItem\",\"Parameters\":{\"TableName\":\"",
+              {
+                "Ref": "AuditTable18A3095C"
+              },
+              "\",\"Key\":{\"pk\":{\"S.$\":\"States.Format('APPROVAL#{}', $.approvalRequest.approvalId)\"},\"sk\":{\"S\":\"META\"}},\"UpdateExpression\":\"SET #s = :s, decidedAt = :t\",\"ConditionExpression\":\"#s IN (:pending, :deciding)\",\"ExpressionAttributeNames\":{\"#s\":\"status\"},\"ExpressionAttributeValues\":{\":s\":{\"S\":\"REJECTED\"},\":t\":{\"S.$\":\"$$.State.EnteredTime\"},\":pending\":{\"S\":\"PENDING\"},\":deciding\":{\"S\":\"DECIDING\"}}},\"ResultPath\":\"$.recordResult\",\"Catch\":[{\"ErrorEquals\":[\"DynamoDB.ConditionalCheckFailedException\"],\"ResultPath\":\"$.recordError\",\"Next\":\"MirrorRejected\"}]},\"RequestApproval\":{\"Next\":\"Apply\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.Timeout\"],\"ResultPath\":\"$.error\",\"Next\":\"RecordExpired\"},{\"ErrorEquals\":[\"Rejected\"],\"ResultPath\":\"$.error\",\"Next\":\"RecordRejected\"},{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"TimeoutSeconds\":259200,\"ResultPath\":\"$.approval\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::lambda:invoke.waitForTaskToken\",\"Parameters\":{\"FunctionName\":\"",
+              {
+                "Fn::GetAtt": [
+                  "NotifierFunctionAF3DBB87",
+                  "Arn"
+                ]
+              },
+              "\",\"Payload\":{\"mode\":\"approval\",\"taskToken.$\":\"$$.Task.Token\",\"approvalId.$\":\"$.approvalRequest.approvalId\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\"}}},\"NewApprovalId\":{\"Type\":\"Pass\",\"ResultPath\":\"$.approvalRequest\",\"Parameters\":{\"approvalId.$\":\"States.UUID()\"},\"Next\":\"RequestApproval\"},\"Apply\":{\"Next\":\"RecordApplied\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":\"$.apply\",\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "ExecutorFunction90B119DB",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"detect.$\":\"$.detect\",\"config.$\":\"$.config\",\"approval.$\":\"$.approval\",\"approvalId.$\":\"$.approvalRequest.approvalId\"}},\"RecordApplied\":{\"Next\":\"NotifyResult\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::dynamodb:putItem\",\"Parameters\":{\"TableName\":\"",
+              {
+                "Ref": "AuditTable18A3095C"
+              },
+              "\",\"Item\":{\"pk\":{\"S.$\":\"States.Format('RUN#{}', $.detect.runId)\"},\"sk\":{\"S.$\":\"States.Format('APPROVAL#{}', $.approvalRequest.approvalId)\"},\"event\":{\"S\":\"APPROVED\"},\"at\":{\"S.$\":\"$$.State.EnteredTime\"},\"actor\":{\"S\":\"statemachine\"},\"detail\":{\"S.$\":\"States.JsonToString($.apply)\"},\"approvedBy\":{\"S.$\":\"States.JsonToString($.approval.approvedBy)\"}},\"ConditionExpression\":\"attribute_not_exists(pk) AND attribute_not_exists(sk)\"},\"ResultPath\":\"$.recordResult\",\"Catch\":[{\"ErrorEquals\":[\"DynamoDB.ConditionalCheckFailedException\"],\"ResultPath\":\"$.recordError\",\"Next\":\"NotifyResult\"}]},\"NotifyResult\":{\"Next\":\"Applied\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":null,\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "NotifierFunctionAF3DBB87",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"mode\":\"result\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\",\"approval.$\":\"$.approval\",\"apply.$\":\"$.apply\"}},\"Applied\":{\"Type\":\"Succeed\"},\"RecordExpired\":{\"Next\":\"MirrorExpired\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::dynamodb:updateItem\",\"Parameters\":{\"TableName\":\"",
+              {
+                "Ref": "AuditTable18A3095C"
+              },
+              "\",\"Key\":{\"pk\":{\"S.$\":\"States.Format('APPROVAL#{}', $.approvalRequest.approvalId)\"},\"sk\":{\"S\":\"META\"}},\"UpdateExpression\":\"SET #s = :s, decidedAt = :t\",\"ConditionExpression\":\"#s IN (:pending, :deciding)\",\"ExpressionAttributeNames\":{\"#s\":\"status\"},\"ExpressionAttributeValues\":{\":s\":{\"S\":\"EXPIRED\"},\":t\":{\"S.$\":\"$$.State.EnteredTime\"},\":pending\":{\"S\":\"PENDING\"},\":deciding\":{\"S\":\"DECIDING\"}}},\"ResultPath\":\"$.recordResult\",\"Catch\":[{\"ErrorEquals\":[\"DynamoDB.ConditionalCheckFailedException\"],\"ResultPath\":\"$.recordError\",\"Next\":\"MirrorExpired\"}]},\"MirrorExpired\":{\"Next\":\"NotifyExpired\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::dynamodb:putItem\",\"Parameters\":{\"TableName\":\"",
+              {
+                "Ref": "AuditTable18A3095C"
+              },
+              "\",\"Item\":{\"pk\":{\"S.$\":\"States.Format('RUN#{}', $.detect.runId)\"},\"sk\":{\"S.$\":\"States.Format('APPROVAL#{}', $.approvalRequest.approvalId)\"},\"event\":{\"S\":\"EXPIRED\"},\"at\":{\"S.$\":\"$$.State.EnteredTime\"},\"actor\":{\"S\":\"statemachine\"},\"detail\":{\"S.$\":\"States.JsonToString($.error)\"}},\"ConditionExpression\":\"attribute_not_exists(pk) AND attribute_not_exists(sk)\"},\"ResultPath\":\"$.recordResult\",\"Catch\":[{\"ErrorEquals\":[\"DynamoDB.ConditionalCheckFailedException\"],\"ResultPath\":\"$.recordError\",\"Next\":\"NotifyExpired\"}]},\"NotifyExpired\":{\"Next\":\"Expired\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":null,\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "NotifierFunctionAF3DBB87",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"mode\":\"expired\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\",\"error.$\":\"$.error\"}},\"Expired\":{\"Type\":\"Succeed\"},\"Rejected\":{\"Type\":\"Succeed\"},\"RunFailed\":{\"Type\":\"Fail\"}},\"TimeoutSeconds\":266400}"
             ]
           ]
         },
@@ -2194,6 +2281,32 @@
               }
             },
             {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "ExecutorFunction90B119DB",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "ExecutorFunction90B119DB",
+                          "Arn"
+                        ]
+                      },
+                      ":*"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
               "Action": [
                 "logs:CreateLogDelivery",
                 "logs:GetLogDelivery",
@@ -2206,6 +2319,40 @@
               ],
               "Effect": "Allow",
               "Resource": "*"
+            },
+            {
+              "Action": "dynamodb:PutItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "RUN#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "dynamodb:UpdateItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "APPROVAL#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
             }
           ],
           "Version": "2012-10-17"

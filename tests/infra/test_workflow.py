@@ -5,9 +5,12 @@ from aws_cdk import assertions
 from aws_cdk.assertions import Match
 
 from tests.infra.helpers import (
+    APPROVAL_HANDLER,
     DETECTOR_HANDLER,
+    EXECUTOR_HANDLER,
     NOTIFIER_HANDLER,
     actions,
+    render,
     resources,
     role_statements,
     state_machine_definition,
@@ -21,12 +24,39 @@ STATE_NAMES = {
     "Normalize",
     "Detect",
     "HasCandidates",
-    "ApprovalNotYetImplemented",
     "NotifyReportOnly",
+    "NewApprovalId",
+    "RequestApproval",
+    "RecordRejected",
+    "MirrorRejected",
+    "NotifyRejected",
+    "Rejected",
+    "RecordExpired",
+    "MirrorExpired",
+    "NotifyExpired",
+    "Expired",
+    "Apply",
+    "RecordApplied",
+    "NotifyResult",
+    "Applied",
     "NotifyFailure",
     "RunFailed",
 }
-LAMBDA_TASKS = ("Detect", "NotifyReportOnly")
+# LambdaInvoke tasks whose only catch is "everything to NotifyFailure".
+LAMBDA_TASKS = (
+    "Detect",
+    "NotifyReportOnly",
+    "NotifyRejected",
+    "NotifyExpired",
+    "Apply",
+    "NotifyResult",
+)
+# RequestApproval has the same retries but routes timeouts and rejections elsewhere.
+RETRIED_TASKS = (*LAMBDA_TASKS, "RequestApproval")
+CONDITIONAL_CHECK_CATCH = "DynamoDB.ConditionalCheckFailedException"
+# Where the DynamoDB states put their response (jsii cannot render a null
+# ResultPath in raw ASL); it must not overwrite anything a later state reads.
+RECORD_RESULT_PATH = "$.recordResult"
 FORBIDDEN_PREFIXES = ("Delete", "Release", "Terminate")
 TOO_MANY_REQUESTS_RETRY = {
     "ErrorEquals": ["Lambda.TooManyRequestsException"],
@@ -55,6 +85,19 @@ def _topic_id(template: assertions.Template, display_name: str) -> str:
     )
     (topic_id,) = topics
     return topic_id
+
+
+def _function_id(template: assertions.Template, handler: str) -> str:
+    functions = template.find_resources(
+        "AWS::Lambda::Function", {"Properties": {"Handler": handler}}
+    )
+    (function_id,) = functions
+    return function_id
+
+
+def _table_id(template: assertions.Template) -> str:
+    (table_id,) = template.find_resources("AWS::DynamoDB::GlobalTable")
+    return table_id
 
 
 def _alarm(template: assertions.Template, metric_name_or_expression: str) -> dict:
@@ -90,7 +133,7 @@ def test_choice_takes_report_path_for_string_false(template: assertions.Template
 def test_choice_requires_explicit_false_and_candidates(template: assertions.Template):
     choice = state_machine_definition(template)["States"]["HasCandidates"]
     (rule,) = choice["Choices"]
-    assert rule["Next"] == "ApprovalNotYetImplemented"
+    assert rule["Next"] == "NewApprovalId"
     assert rule["And"] == [
         {"Variable": "$.config.dryRun", "IsPresent": True},
         {"Variable": "$.config.dryRun", "BooleanEquals": False},
@@ -98,10 +141,199 @@ def test_choice_requires_explicit_false_and_candidates(template: assertions.Temp
     ]
 
 
-def test_approval_placeholder_continues_to_report(template: assertions.Template):
+def test_new_approval_id_uses_states_uuid(template: assertions.Template):
+    state = state_machine_definition(template)["States"]["NewApprovalId"]
+    assert state["Type"] == "Pass"
+    assert state["Parameters"] == {"approvalId.$": "States.UUID()"}
+    assert state["ResultPath"] == "$.approvalRequest"
+    assert state["Next"] == "RequestApproval"
+
+
+def test_request_approval_waits_for_task_token_with_72h_timeout(template: assertions.Template):
+    state = state_machine_definition(template)["States"]["RequestApproval"]
+    assert state["Type"] == "Task"
+    assert state["Resource"].endswith(":states:::lambda:invoke.waitForTaskToken")
+    assert state["TimeoutSeconds"] == 259200
+    assert state["Parameters"]["Payload"] == {
+        "mode": "approval",
+        "taskToken.$": "$$.Task.Token",
+        "approvalId.$": "$.approvalRequest.approvalId",
+        "detect.$": "$.detect",
+        "config.$": "$.config",
+    }
+    assert state["ResultPath"] == "$.approval"
+    assert state["Next"] == "Apply"
+
+
+def test_request_approval_catches_timeout_then_rejected_then_all(template: assertions.Template):
+    state = state_machine_definition(template)["States"]["RequestApproval"]
+    assert state["Catch"] == [
+        {"ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "RecordExpired"},
+        {"ErrorEquals": ["Rejected"], "ResultPath": "$.error", "Next": "RecordRejected"},
+        {"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"},
+    ]
+
+
+def test_apply_reads_detect_values_not_approval(template: assertions.Template):
+    definition = state_machine_definition(template)
+    apply = definition["States"]["Apply"]
+    # payload_response_only: Parameters is the executor's event itself.
+    assert apply["Parameters"] == {
+        "detect.$": "$.detect",
+        "config.$": "$.config",
+        "approval.$": "$.approval",
+        "approvalId.$": "$.approvalRequest.approvalId",
+    }
+    assert apply["ResultPath"] == "$.apply"
+    assert apply["Next"] == "RecordApplied"
+    # The plan version and digest come from the detector's output only; the
+    # approval callback cannot redirect the executor to another plan.
+    text = json.dumps(definition)
+    for field in ("planVersionId", "planSha256"):
+        assert f"$.approval.{field}" not in text
+
+
+@pytest.mark.parametrize(
+    ("state_name", "status", "mirror"),
+    [
+        ("RecordRejected", "REJECTED", "MirrorRejected"),
+        ("RecordExpired", "EXPIRED", "MirrorExpired"),
+    ],
+)
+def test_record_states_are_conditional_and_catch_conditional_failures(
+    template: assertions.Template, state_name: str, status: str, mirror: str
+):
+    state = state_machine_definition(template)["States"][state_name]
+    assert state["Type"] == "Task"
+    # The partition and the table name are tokens, shown as "X" by the helper.
+    assert state["Resource"] == "arn:X:states:::dynamodb:updateItem"
+    assert state["Parameters"] == {
+        "TableName": "X",
+        "Key": {
+            "pk": {"S.$": "States.Format('APPROVAL#{}', $.approvalRequest.approvalId)"},
+            "sk": {"S": "META"},
+        },
+        "UpdateExpression": "SET #s = :s, decidedAt = :t",
+        "ConditionExpression": "#s IN (:pending, :deciding)",
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {
+            ":s": {"S": status},
+            ":t": {"S.$": "$$.State.EnteredTime"},
+            ":pending": {"S": "PENDING"},
+            ":deciding": {"S": "DECIDING"},
+        },
+    }
+    assert state["ResultPath"] == RECORD_RESULT_PATH
+    assert state["Catch"] == [
+        {"ErrorEquals": [CONDITIONAL_CHECK_CATCH], "ResultPath": "$.recordError", "Next": mirror}
+    ]
+    assert state["Next"] == mirror
+
+
+@pytest.mark.parametrize(
+    ("state_name", "event", "detail", "next_state"),
+    [
+        ("MirrorRejected", "REJECTED", "$.error", "NotifyRejected"),
+        ("MirrorExpired", "EXPIRED", "$.error", "NotifyExpired"),
+        ("RecordApplied", "APPROVED", "$.apply", "NotifyResult"),
+    ],
+)
+def test_mirror_items_are_conditional_puts_under_run_partition(
+    template: assertions.Template, state_name: str, event: str, detail: str, next_state: str
+):
+    state = state_machine_definition(template)["States"][state_name]
+    assert state["Type"] == "Task"
+    assert state["Resource"] == "arn:X:states:::dynamodb:putItem"
+    item = {
+        "pk": {"S.$": "States.Format('RUN#{}', $.detect.runId)"},
+        "sk": {"S.$": "States.Format('APPROVAL#{}', $.approvalRequest.approvalId)"},
+        "event": {"S": event},
+        "at": {"S.$": "$$.State.EnteredTime"},
+        "actor": {"S": "statemachine"},
+        "detail": {"S.$": f"States.JsonToString({detail})"},
+    }
+    if state_name == "RecordApplied":
+        item["approvedBy"] = {"S.$": "States.JsonToString($.approval.approvedBy)"}
+    assert state["Parameters"] == {
+        "TableName": "X",
+        "Item": item,
+        "ConditionExpression": "attribute_not_exists(pk) AND attribute_not_exists(sk)",
+    }
+    assert state["ResultPath"] == RECORD_RESULT_PATH
+    assert state["Catch"] == [
+        {
+            "ErrorEquals": [CONDITIONAL_CHECK_CATCH],
+            "ResultPath": "$.recordError",
+            "Next": next_state,
+        }
+    ]
+    assert state["Next"] == next_state
+
+
+def test_record_result_path_is_read_by_no_state(template: assertions.Template):
+    text = json.dumps(state_machine_definition(template))
+    assert text.count(f'"{RECORD_RESULT_PATH}"') == 5  # the five ResultPath values only
+    assert f"{RECORD_RESULT_PATH}." not in text
+
+
+@pytest.mark.parametrize(
+    "state_name",
+    ["RecordRejected", "MirrorRejected", "RecordExpired", "MirrorExpired", "RecordApplied"],
+)
+def test_dynamodb_states_write_the_audit_table(template: assertions.Template, state_name: str):
+    parts = _raw_definition_parts(template)
+    marker = f'"{state_name}":{{'
+    start = next(i for i, part in enumerate(parts) if isinstance(part, str) and marker in part)
+    tokens = [part for part in parts[start + 1 : start + 4] if not isinstance(part, str)]
+    # Resource (partition), then TableName.
+    assert tokens[:2] == [{"Ref": "AWS::Partition"}, {"Ref": _table_id(template)}]
+
+
+@pytest.mark.parametrize(
+    ("state_name", "payload", "end"),
+    [
+        (
+            "NotifyRejected",
+            {
+                "mode": "rejected",
+                "detect.$": "$.detect",
+                "config.$": "$.config",
+                "error.$": "$.error",
+            },
+            "Rejected",
+        ),
+        (
+            "NotifyExpired",
+            {
+                "mode": "expired",
+                "detect.$": "$.detect",
+                "config.$": "$.config",
+                "error.$": "$.error",
+            },
+            "Expired",
+        ),
+        (
+            "NotifyResult",
+            {
+                "mode": "result",
+                "detect.$": "$.detect",
+                "config.$": "$.config",
+                "approval.$": "$.approval",
+                "apply.$": "$.apply",
+            },
+            "Applied",
+        ),
+    ],
+)
+def test_outcome_notifications_end_in_succeed_states(
+    template: assertions.Template, state_name: str, payload: dict, end: str
+):
     states = state_machine_definition(template)["States"]
-    assert states["ApprovalNotYetImplemented"]["Type"] == "Pass"
-    assert states["ApprovalNotYetImplemented"]["Next"] == "NotifyReportOnly"
+    state = states[state_name]
+    assert state["Parameters"] == payload
+    assert state["ResultPath"] is None
+    assert state["Next"] == end
+    assert states[end] == {"Type": "Succeed"}
 
 
 def test_defaults_and_normalize_merge_execution_input(template: assertions.Template):
@@ -142,7 +374,7 @@ def test_notify_report_only_payload(template: assertions.Template):
     assert notify["End"] is True
 
 
-@pytest.mark.parametrize("state_name", LAMBDA_TASKS)
+@pytest.mark.parametrize("state_name", RETRIED_TASKS)
 def test_lambda_invoke_tasks_retry_on_too_many_requests(
     template: assertions.Template, state_name: str
 ):
@@ -167,10 +399,6 @@ def test_notify_failure_publishes_to_alerts_then_fails(template: assertions.Temp
     notify = states["NotifyFailure"]
     assert notify["Resource"].endswith(":states:::sns:publish")
     assert notify["Parameters"]["Subject"] == "[Lab Janitor] Run failed"
-    assert notify["Parameters"]["Message.$"] == (
-        "States.Format('Execution {} failed with {}: {}', "
-        "$$.Execution.Id, $.error.Error, $.error.Cause)"
-    )
     assert notify["Next"] == "RunFailed"
     assert states["RunFailed"]["Type"] == "Fail"
 
@@ -178,23 +406,41 @@ def test_notify_failure_publishes_to_alerts_then_fails(template: assertions.Temp
     assert {"Ref": _topic_id(template, "Lab Janitor Alerts")} in _raw_definition_parts(template)
 
 
+def test_notify_failure_message_survives_missing_cause(template: assertions.Template):
+    # A caught error need not carry a Cause; States.Format with $.error.Cause
+    # would then raise inside NotifyFailure and the alert would be lost.
+    definition = state_machine_definition(template)
+    notify = definition["States"]["NotifyFailure"]
+    assert notify["Parameters"]["Message.$"] == (
+        "States.Format('Execution {} failed: {}', $$.Execution.Id, States.JsonToString($.error))"
+    )
+    assert "$.error.Cause" not in json.dumps(definition)
+
+
 @pytest.mark.parametrize(
     ("state_name", "handler"),
-    [("Detect", DETECTOR_HANDLER), ("NotifyReportOnly", NOTIFIER_HANDLER)],
+    [
+        ("Detect", DETECTOR_HANDLER),
+        ("NotifyReportOnly", NOTIFIER_HANDLER),
+        ("RequestApproval", NOTIFIER_HANDLER),
+        ("NotifyRejected", NOTIFIER_HANDLER),
+        ("NotifyExpired", NOTIFIER_HANDLER),
+        ("Apply", EXECUTOR_HANDLER),
+        ("NotifyResult", NOTIFIER_HANDLER),
+    ],
 )
 def test_lambda_tasks_invoke_their_functions(
     template: assertions.Template, state_name: str, handler: str
 ):
-    functions = template.find_resources(
-        "AWS::Lambda::Function", {"Properties": {"Handler": handler}}
-    )
-    (function_id,) = functions
+    function_id = _function_id(template, handler)
     parts = _raw_definition_parts(template)
     marker = f'"{state_name}":{{'
     start = next(i for i, part in enumerate(parts) if isinstance(part, str) and marker in part)
-    # The state's Resource is the first token after its name in the joined definition.
-    resource = next(part for part in parts[start + 1 :] if not isinstance(part, str))
-    assert resource == {"Fn::GetAtt": [function_id, "Arn"]}
+    # The function is the first Fn::GetAtt after the state's name in the joined
+    # definition: its Resource, or for RequestApproval (whose Resource is the
+    # waitForTaskToken integration) its FunctionName parameter.
+    function = next(part for part in parts[start + 1 :] if "Fn::GetAtt" in part)
+    assert function == {"Fn::GetAtt": [function_id, "Arn"]}
 
 
 def test_state_machine_settings(template: assertions.Template):
@@ -204,7 +450,11 @@ def test_state_machine_settings(template: assertions.Template):
     properties = machine["Properties"]
     assert properties["StateMachineType"] == "STANDARD"
     assert "StateMachineName" not in properties
-    assert state_machine_definition(template)["TimeoutSeconds"] == 7200
+    definition = state_machine_definition(template)
+    # The 72 h approval wait plus the 2 h run budget: the execution must
+    # outlive RequestApproval's own timeout so that it reaches RecordExpired.
+    assert definition["TimeoutSeconds"] == (72 + 2) * 3600
+    assert definition["TimeoutSeconds"] > definition["States"]["RequestApproval"]["TimeoutSeconds"]
 
     logging = properties["LoggingConfiguration"]
     assert logging["Level"] == "ERROR"
@@ -310,12 +560,25 @@ def test_alarms_notify_alerts_on_alarm_and_ok(template: assertions.Template):
 # --- outputs, description, tags ------------------------------------------------------------
 
 
-def test_outputs_carry_no_email(template: assertions.Template):
-    outputs = template.find_outputs("*")
-    names = sorted(outputs)
-    assert len(names) == 3
-    for prefix in ("StateMachineArn", "PlansBucketName", "AuditTableName"):
-        assert any(prefix in name for name in names), prefix
+def test_outputs_are_at_stack_level(template: assertions.Template):
+    outputs = template.to_json()["Outputs"]
+    assert set(outputs) == {
+        "StateMachineArn",
+        "PlansBucketName",
+        "AuditTableName",
+        "ApprovalApiUrl",
+    }
+    assert outputs["StateMachineArn"]["Value"] == {"Ref": state_machine_id(template)}
+    (bucket_id,) = template.find_resources("AWS::S3::Bucket")
+    assert outputs["PlansBucketName"]["Value"] == {"Ref": bucket_id}
+    assert outputs["AuditTableName"]["Value"] == {"Ref": _table_id(template)}
+    (api_id,) = template.find_resources("AWS::ApiGatewayV2::Api")
+    assert outputs["ApprovalApiUrl"]["Value"] == {"Fn::GetAtt": [api_id, "ApiEndpoint"]}
+
+
+def test_no_output_contains_an_email(template: assertions.Template):
+    outputs = template.to_json()["Outputs"]
+    assert outputs
     assert "@" not in json.dumps(outputs)
 
 
@@ -364,6 +627,44 @@ def test_state_machine_role_delete_actions_are_only_log_delivery(template: asser
         if a.split(":")[1].startswith(FORBIDDEN_PREFIXES)
     }
     assert deletes == {"logs:DeleteLogDelivery"}
+
+
+def test_state_machine_role_cannot_invoke_the_approval_handler(template: assertions.Template):
+    statements = statements_of_role(template, state_machine_role_id(template))
+    invoked = {
+        render(resource)
+        for st in statements
+        if st["Effect"] == "Allow" and "lambda:InvokeFunction" in actions(st)
+        for resource in resources(st)
+    }
+    expected = set()
+    for handler in (DETECTOR_HANDLER, NOTIFIER_HANDLER, EXECUTOR_HANDLER):
+        function_id = _function_id(template, handler)
+        expected |= {f"<{function_id}.Arn>", f"<{function_id}.Arn>:*"}
+    assert invoked == expected
+    assert _function_id(template, APPROVAL_HANDLER) not in json.dumps(statements)
+
+
+def test_state_machine_dynamodb_grants_carry_leading_keys(template: assertions.Template):
+    statements = statements_of_role(template, state_machine_role_id(template))
+    dynamodb = [
+        st
+        for st in statements
+        if st["Effect"] == "Allow" and any(a.startswith("dynamodb:") for a in actions(st))
+    ]
+    table_arn = {"Fn::GetAtt": [_table_id(template), "Arn"]}
+    granted = {}
+    for st in dynamodb:
+        assert resources(st) == [table_arn], st
+        (action,) = actions(st)
+        granted[action] = st["Condition"]
+    assert len(dynamodb) == 2
+    assert granted == {
+        "dynamodb:PutItem": {"ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["RUN#*"]}},
+        "dynamodb:UpdateItem": {
+            "ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["APPROVAL#*"]}
+        },
+    }
 
 
 def test_state_machine_wildcard_resource_is_only_log_delivery(template: assertions.Template):

@@ -1,6 +1,6 @@
-"""The weekly workflow: state machine, Monday schedule, alarms and outputs."""
+"""The weekly workflow: state machine, Monday schedule and alarms."""
 
-from aws_cdk import CfnOutput, Duration, RemovalPolicy, TimeZone
+from aws_cdk import Duration, RemovalPolicy, TimeZone
 from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_cloudwatch_actions as cw_actions
 from aws_cdk import aws_logs as logs
@@ -14,23 +14,31 @@ from constructs import Construct
 from lab_janitor.audit import AuditStore
 from lab_janitor.config import JanitorConfig
 from lab_janitor.detector import Detector
+from lab_janitor.executor import Executor
 from lab_janitor.nag import OBSERVABILITY_REASON, acknowledge, wildcard_resource_finding
 from lab_janitor.notifications import Notifications
 from lab_janitor.notifier import Notifier
+from lab_janitor.workflow_approval import APPROVAL_TIMEOUT, ApprovalBranch, add_throttle_retry
 
 ALARM_PERIOD = Duration.minutes(5)
-THROTTLE_ERRORS = ["Lambda.TooManyRequestsException"]
+# Detect, report, apply and notify fit in two hours; an execution that asks
+# for approval also waits up to APPROVAL_TIMEOUT. A shorter execution timeout
+# would end the run before the RequestApproval timeout could route it to
+# RecordExpired.
+RUN_BUDGET = Duration.hours(2)
+EXECUTION_TIMEOUT = APPROVAL_TIMEOUT.plus(RUN_BUDGET)
 
 
 class Workflow(Construct):
     """Standard state machine that runs the weekly sweep, plus its schedule and alarms.
 
-    Plan 1 only has the report path: ``Defaults`` and ``Normalize`` build the
-    run configuration (dry run unless the input explicitly says otherwise),
-    ``Detect`` sweeps and writes the plan, and ``NotifyReportOnly`` emails the
-    report. A run that would need approval goes through the
-    ``ApprovalNotYetImplemented`` placeholder and still only reports. Any task
-    failure is published to the alerts topic before the execution fails.
+    ``Defaults`` and ``Normalize`` build the run configuration (dry run
+    unless the input explicitly says otherwise) and ``Detect`` sweeps and
+    writes the plan. A dry run, or a run with nothing to delete, ends at
+    ``NotifyReportOnly``, which emails the report. Otherwise the approval
+    branch (``lab_janitor.workflow_approval``) asks for approval and applies,
+    rejects or expires the plan. Any task failure is published to the alerts
+    topic before the execution fails.
     """
 
     def __init__(  # noqa: PLR0913 - construct props are keyword-only dependencies
@@ -41,38 +49,46 @@ class Workflow(Construct):
         config: JanitorConfig,
         detector: Detector,
         notifier: Notifier,
+        executor: Executor,
         notifications: Notifications,
         audit: AuditStore,
         dlq: sqs.IQueue,
     ) -> None:
         super().__init__(scope, construct_id)
 
-        self.state_machine = self._state_machine(config, detector, notifier, notifications)
+        self.state_machine = self._state_machine(
+            config=config,
+            detector=detector,
+            notifier=notifier,
+            executor=executor,
+            notifications=notifications,
+            audit=audit,
+        )
         self.schedule = self._schedule(config, dlq)
         self.alarms = self._alarms(notifications, dlq)
 
-        CfnOutput(self, "StateMachineArn", value=self.state_machine.state_machine_arn)
-        CfnOutput(self, "PlansBucketName", value=audit.plans_bucket.bucket_name)
-        CfnOutput(self, "AuditTableName", value=audit.table.table_name)
-
-    def _state_machine(
+    def _state_machine(  # noqa: PLR0913 - one argument per construct the machine drives
         self,
+        *,
         config: JanitorConfig,
         detector: Detector,
         notifier: Notifier,
+        executor: Executor,
         notifications: Notifications,
+        audit: AuditStore,
     ) -> sfn.StateMachine:
         notify_failure = tasks.SnsPublish(
             self,
             "NotifyFailure",
             topic=notifications.alerts_topic,
             subject="[Lab Janitor] Run failed",
+            # The whole error as JSON: a caught error need not carry a Cause,
+            # and a missing path would make this state fail and lose the alert.
             message=sfn.TaskInput.from_text(
                 sfn.JsonPath.format(
-                    "Execution {} failed with {}: {}",
+                    "Execution {} failed: {}",
                     sfn.JsonPath.execution_id,
-                    sfn.JsonPath.string_at("$.error.Error"),
-                    sfn.JsonPath.string_at("$.error.Cause"),
+                    sfn.JsonPath.json_to_string(sfn.JsonPath.object_at("$.error")),
                 )
             ),
         ).next(sfn.Fail(self, "RunFailed"))
@@ -119,16 +135,16 @@ class Workflow(Construct):
             retry_on_service_exceptions=True,
         )
         for task in (detect, notify_report_only):
-            task.add_retry(
-                errors=THROTTLE_ERRORS,
-                interval=Duration.seconds(30),
-                backoff_rate=2,
-                max_attempts=5,
-            )
+            add_throttle_retry(task)
             task.add_catch(notify_failure, result_path="$.error")
 
-        # Plan 2 replaces this placeholder with the approval request.
-        approval_placeholder = sfn.Pass(self, "ApprovalNotYetImplemented").next(notify_report_only)
+        approval_branch = ApprovalBranch(
+            self,
+            notifier=notifier.function,
+            executor=executor.function,
+            table_name=audit.table.table_name,
+            notify_failure=notify_failure,
+        ).build()
         has_candidates = (
             sfn.Choice(self, "HasCandidates")
             .when(
@@ -137,7 +153,7 @@ class Workflow(Construct):
                     sfn.Condition.boolean_equals("$.config.dryRun", False),
                     sfn.Condition.number_greater_than("$.detect.candidateCount", 0),
                 ),
-                approval_placeholder,
+                approval_branch,
             )
             .otherwise(notify_report_only)
         )
@@ -156,21 +172,27 @@ class Workflow(Construct):
             definition_body=sfn.DefinitionBody.from_chainable(definition),
             state_machine_type=sfn.StateMachineType.STANDARD,
             logs=sfn.LogOptions(destination=log_group, level=sfn.LogLevel.ERROR),
-            timeout=Duration.hours(2),
+            timeout=EXECUTION_TIMEOUT,
         )
-        self._acknowledge_state_machine(state_machine, detector, notifier)
+        # The DynamoDB states are CustomState and generate no IAM: grant only
+        # the RUN# event puts and the APPROVAL# record updates they make.
+        audit.grant_run_event_writes(state_machine.role)
+        audit.grant_approval_updates(state_machine.role)
+        self._acknowledge_state_machine(state_machine, (detector, notifier, executor))
         return state_machine
 
     @staticmethod
     def _acknowledge_state_machine(
-        state_machine: sfn.StateMachine, detector: Detector, notifier: Notifier
+        state_machine: sfn.StateMachine, invoked: tuple[Detector | Notifier | Executor, ...]
     ) -> None:
         invoke_versions = "CDK LambdaInvoke grants the function and its versions"
         acknowledge(
             state_machine.role,
             {
-                wildcard_resource_finding(detector.function, ":*"): invoke_versions,
-                wildcard_resource_finding(notifier.function, ":*"): invoke_versions,
+                **{
+                    wildcard_resource_finding(construct.function, ":*"): invoke_versions
+                    for construct in invoked
+                },
                 # Added by CDK for the logs option (see the Step Functions guide,
                 # "IAM Policies for logging to CloudWatch Logs").
                 "AwsSolutions::AwsSolutions-IAM5[Resource::*]": (

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from aws_cdk import Duration, Stack, Tags
+from aws_cdk import CfnOutput, Duration, Stack, Tags
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
@@ -71,25 +71,33 @@ class LabJanitorStack(Stack):
             notifications=self.notifications,
             code=code,
         )
+        notifier_role = self.notifier.function.role
+        if notifier_role is None:  # Function always creates a role when none is passed in.
+            raise RuntimeError("notifier function has no execution role")
+        self.notifications.restrict_publishers(notifier_role.role_arn)
         self.approval_api = ApprovalApi(
             self, "ApprovalApi", config=self.config, audit=self.audit, code=code
         )
         self.notifier.function.add_environment("APPROVAL_URL", self.approval_api.url)
         self.executor = Executor(self, "Executor", config=self.config, audit=self.audit, code=code)
-        notifier_role = self.notifier.function.role
-        if notifier_role is None:  # Function always creates a role when none is passed in.
-            raise RuntimeError("notifier function has no execution role")
-        self.notifications.restrict_publishers(notifier_role.role_arn)
         self.workflow = Workflow(
             self,
             "Workflow",
             config=self.config,
             detector=self.detector,
             notifier=self.notifier,
+            executor=self.executor,
             notifications=self.notifications,
             audit=self.audit,
             dlq=self.dlq,
         )
+
+        # Stack-level outputs keep their logical ids stable and readable.
+        # None of them carries an email address.
+        CfnOutput(self, "StateMachineArn", value=self.workflow.state_machine.state_machine_arn)
+        CfnOutput(self, "PlansBucketName", value=self.audit.plans_bucket.bucket_name)
+        CfnOutput(self, "AuditTableName", value=self.audit.table.table_name)
+        CfnOutput(self, "ApprovalApiUrl", value=self.approval_api.url)
 
         for key, value in STACK_TAGS.items():
             Tags.of(self).add(key, value)
