@@ -1,10 +1,9 @@
 import io
 
-import boto3
 import pytest
 from botocore.response import StreamingBody
-from botocore.stub import Stubber
 
+from notifier import approval, outcomes, report
 from notifier import handler as notifier
 from shared.plan_store import PlanStore
 
@@ -42,24 +41,6 @@ def report_event(**overrides) -> dict:
     }
 
 
-@pytest.fixture
-def s3_stub():
-    client = boto3.client("s3", region_name="us-east-1")
-    stubber = Stubber(client)
-    stubber.activate()
-    yield client, stubber
-    stubber.deactivate()
-
-
-@pytest.fixture
-def sns_stub():
-    client = boto3.client("sns", region_name="us-east-1")
-    stubber = Stubber(client)
-    stubber.activate()
-    yield client, stubber
-    stubber.deactivate()
-
-
 def install(monkeypatch, s3_stub, sns_stub, report: str) -> None:
     """Make ``build_dependencies`` return stubbed S3 and SNS clients serving ``report``."""
     s3_client, s3_stubber = s3_stub
@@ -70,7 +51,7 @@ def install(monkeypatch, s3_stub, sns_stub, report: str) -> None:
         {"Bucket": BUCKET, "Key": REPORT_KEY, "VersionId": REPORT_VERSION},
     )
     monkeypatch.setattr(
-        notifier, "build_dependencies", lambda: (PlanStore(s3_client, BUCKET), sns_stub[0])
+        notifier, "build_dependencies", lambda: (PlanStore(s3_client, BUCKET), sns_stub[0], None)
     )
 
 
@@ -119,14 +100,14 @@ def test_short_report_is_published_unchanged(monkeypatch, s3_stub, sns_stub):
 
 
 def test_subject_marks_dry_run_and_stays_short():
-    subject = notifier.report_subject(detect_result(dryRun=True))
+    subject = report.report_subject(detect_result(dryRun=True))
 
     assert subject == "[Lab Janitor] Weekly report: 3 candidates, ~$42.50/month (DRY RUN)"
     assert len(subject) < 100
 
 
 def test_subject_for_live_run_has_no_dry_run_marker():
-    subject = notifier.report_subject(detect_result(dryRun=False, estimatedMonthlyUsd=7))
+    subject = report.report_subject(detect_result(dryRun=False, estimatedMonthlyUsd=7))
 
     assert subject == "[Lab Janitor] Weekly report: 3 candidates, ~$7.00/month"
 
@@ -139,7 +120,7 @@ def test_subject_for_live_run_has_no_dry_run_marker():
     ],
 )
 def test_long_subject_falls_back(dry_run, expected):
-    subject = notifier.report_subject(detect_result(dryRun=dry_run, estimatedMonthlyUsd=1e90))
+    subject = report.report_subject(detect_result(dryRun=dry_run, estimatedMonthlyUsd=1e90))
 
     assert subject == expected
 
@@ -153,7 +134,26 @@ def test_dry_run_comes_from_detect_result_not_config(monkeypatch, s3_stub, sns_s
     assert notifier.handler(event, None)["published"] is True
 
 
-@pytest.mark.parametrize("event", [{"mode": "approval"}, {"mode": "bogus"}, {}])
+@pytest.mark.parametrize("event", [{"mode": "bogus"}, {}])
 def test_unknown_mode_raises(event):
     with pytest.raises(ValueError, match="unknown notifier mode"):
         notifier.handler(event, None)
+
+
+@pytest.mark.parametrize(
+    ("mode", "module", "function"),
+    [
+        ("report", report, "publish_report"),
+        ("approval", approval, "request_approval"),
+        ("result", outcomes, "publish_result"),
+        ("expired", outcomes, "publish_expired"),
+        ("rejected", outcomes, "publish_rejected"),
+    ],
+)
+def test_handler_dispatches_every_mode(monkeypatch, mode, module, function):
+    calls: list[dict] = []
+    monkeypatch.setattr(module, function, lambda event: calls.append(event) or {"mode": mode})
+    event = {"mode": mode, "detect": {}}
+
+    assert notifier.handler(event, None) == {"mode": mode}
+    assert calls == [event]

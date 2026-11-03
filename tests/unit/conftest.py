@@ -108,3 +108,29 @@ def ctx(ctx_factory) -> SweepContext:
 @pytest.fixture
 def ctx_past_deadline(ctx_factory) -> SweepContext:
     return ctx_factory(deadline=time.time() - 1)
+
+
+def _stubbed_client(service: str):
+    client = boto3.client(service, region_name=REGION)
+    stubber = Stubber(client)
+    stubber.activate()
+    yield client, stubber
+    stubber.deactivate()
+
+
+@pytest.fixture
+def s3_stub():
+    """A stubbed S3 client and its Stubber."""
+    yield from _stubbed_client("s3")
+
+
+@pytest.fixture
+def sns_stub():
+    """A stubbed SNS client and its Stubber."""
+    yield from _stubbed_client("sns")
+
+
+@pytest.fixture
+def ddb_stub():
+    """A stubbed DynamoDB client and its Stubber."""
+    yield from _stubbed_client("dynamodb")
