@@ -10,12 +10,31 @@ DEFAULT_MIN_AGE_DAYS = 7
 DEFAULT_SCHEDULE_TIMEZONE = "America/Bogota"
 DEFAULT_SCHEDULE_HOUR = 9
 _FALSY_FLAGS = ("false", "False")
+MAX_SCHEDULE_HOUR = 23
 
 
 def _context(node: Node, key: str, default: Any) -> Any:
     """Return the context value for ``key``, or ``default`` when it is unset."""
     value = node.try_get_context(key)
     return default if value is None else value
+
+
+def _int_in_range(key: str, value: Any, low: int, high: int | None = None) -> int:
+    """Parse an integer context value and check ``low <= value <= high``.
+
+    Context passed with ``-c key=value`` arrives as a string, so decimal digit
+    strings are accepted; booleans, floats and anything out of range are not.
+    """
+    expected = f">= {low}" if high is None else f"in {low}..{high}"
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        raise ValueError(f"{key} must be an integer {expected}, got {value!r}")
+    try:
+        number = int(value)
+    except ValueError:
+        raise ValueError(f"{key} must be an integer {expected}, got {value!r}") from None
+    if number < low or (high is not None and number > high):
+        raise ValueError(f"{key} must be an integer {expected}, got {value!r}")
+    return number
 
 
 def _flag(value: Any, *, default: bool) -> bool:
@@ -54,8 +73,15 @@ class JanitorConfig:
             report_email=report_email,
             alert_email=node.try_get_context("alertEmail") or report_email,
             dry_run=_flag(node.try_get_context("dryRun"), default=True),
-            min_age_days=int(_context(node, "minAgeDays", DEFAULT_MIN_AGE_DAYS)),
+            min_age_days=_int_in_range(
+                "minAgeDays", _context(node, "minAgeDays", DEFAULT_MIN_AGE_DAYS), 0
+            ),
             schedule_timezone=_context(node, "scheduleTimezone", DEFAULT_SCHEDULE_TIMEZONE),
-            schedule_hour=int(_context(node, "scheduleHour", DEFAULT_SCHEDULE_HOUR)),
+            schedule_hour=_int_in_range(
+                "scheduleHour",
+                _context(node, "scheduleHour", DEFAULT_SCHEDULE_HOUR),
+                0,
+                MAX_SCHEDULE_HOUR,
+            ),
             janitor_enabled=_flag(node.try_get_context("janitorEnabled"), default=True),
         )

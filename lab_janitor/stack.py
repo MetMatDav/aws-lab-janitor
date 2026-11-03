@@ -16,6 +16,7 @@ from lab_janitor.notifier import Notifier
 from lab_janitor.workflow import Workflow
 
 DESCRIPTION = "Lab janitor: weekly sweep of lab leftovers with plan, approval and audit trail"
+STACK_TAGS = {"Project": "aws-lab-janitor", "ManagedBy": "cdk"}
 
 
 class LabJanitorStack(Stack):
@@ -27,7 +28,10 @@ class LabJanitorStack(Stack):
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs: Any) -> None:
-        super().__init__(scope, construct_id, description=DESCRIPTION, **kwargs)
+        # With @aws-cdk/core:explicitStackTags, Tags.of(self) reaches the resources but
+        # not the stack itself, so the stack tags are passed here as well.
+        tags = {**STACK_TAGS, **(kwargs.pop("tags", None) or {})}
+        super().__init__(scope, construct_id, description=DESCRIPTION, tags=tags, **kwargs)
 
         self.config = JanitorConfig.from_node(self.node)
 
@@ -74,5 +78,5 @@ class LabJanitorStack(Stack):
             dlq=self.dlq,
         )
 
-        Tags.of(self).add("Project", "aws-lab-janitor")
-        Tags.of(self).add("ManagedBy", "cdk")
+        for key, value in STACK_TAGS.items():
+            Tags.of(self).add(key, value)

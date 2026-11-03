@@ -39,3 +39,10 @@ def test_missing_optional_env_does_not_raise():
 
 def test_boolean_min_age_is_ignored():
     assert load_settings({"config": {"minAgeDays": True}}, os.environ).min_age_days == 7
+
+
+@pytest.mark.parametrize("value", ["-1", "seven"])
+def test_invalid_env_min_age_is_rejected(value):
+    env = dict(os.environ, MIN_AGE_DAYS=value)
+    with pytest.raises(ValueError, match="MIN_AGE_DAYS must be an integer >= 0"):
+        load_settings({}, env)

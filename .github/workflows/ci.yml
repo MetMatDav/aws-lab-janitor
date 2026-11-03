@@ -25,6 +25,7 @@ jobs:
       - name: Test
         run: pytest -q
       - name: CDK synth (cdk-nag, strict)
+        # cdk.json runs "python3 app.py": setup-python's python3, which has the pip installs.
         run: npx cdk synth --strict --quiet -c reportEmail=ci@example.com
         env:
           CDK_DEFAULT_ACCOUNT: "123456789012"

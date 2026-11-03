@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from aws_cdk import cx_api
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,3 +35,14 @@ def test_app_requires_account_and_region(env: dict[str, str], missing: str):
     assert missing in result.stderr
     present = next(iter(env))
     assert f"{present} is not set" not in result.stderr
+
+
+def test_stack_artifact_carries_stack_tags(cli_assembly: Path):
+    artifact = cx_api.CloudAssembly(str(cli_assembly)).get_stack_by_name("LabJanitorStack")
+    assert artifact.tags == {"Project": "aws-lab-janitor", "ManagedBy": "cdk"}
+
+
+def test_resources_keep_the_project_tags(cli_template: dict):
+    queue = next(r for r in cli_template["Resources"].values() if r["Type"] == "AWS::SQS::Queue")
+    assert {"Key": "Project", "Value": "aws-lab-janitor"} in queue["Properties"]["Tags"]
+    assert {"Key": "ManagedBy", "Value": "cdk"} in queue["Properties"]["Tags"]

@@ -25,6 +25,18 @@ class Settings:
     region: str
 
 
+def _env_min_age_days(env: Mapping[str, str]) -> int:
+    """``MIN_AGE_DAYS`` from the environment; a non-integer or negative value is an error."""
+    raw = env.get("MIN_AGE_DAYS", DEFAULT_MIN_AGE_DAYS)
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise ValueError(f"MIN_AGE_DAYS must be an integer >= 0, got {raw!r}")
+    return value
+
+
 def load_settings(event: dict, env: Mapping[str, str]) -> Settings:
     """Build Settings from the invocation event and the environment.
 
@@ -39,7 +51,7 @@ def load_settings(event: dict, env: Mapping[str, str]) -> Settings:
     if isinstance(min_age, int) and not isinstance(min_age, bool) and min_age >= 0:
         min_age_days = min_age
     else:
-        min_age_days = int(env.get("MIN_AGE_DAYS", DEFAULT_MIN_AGE_DAYS))
+        min_age_days = _env_min_age_days(env)
 
     markers = {
         name: env.get(name, "")
