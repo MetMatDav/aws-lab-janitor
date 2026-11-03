@@ -1,6 +1,6 @@
 {
   "private": true,
   "devDependencies": {
-    "aws-cdk": "2.1133.0"
+    "aws-cdk": "2.1147.0"
   }
 }
