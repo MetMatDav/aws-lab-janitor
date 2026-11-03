@@ -25,7 +25,10 @@ def detect_ec2(
 
     def run_instances() -> None:
         filters = [{"Name": "instance-state-name", "Values": NOT_TERMINATED_STATES}]
-        for reservation in collect(ec2(), "describe_instances", "Reservations", Filters=filters):
+        reservations = collect(
+            ec2(), "describe_instances", "Reservations", deadline=ctx.deadline, Filters=filters
+        )
+        for reservation in reservations:
             for instance in reservation.get("Instances", []):
                 findings.append(_instance(instance, region, ctx))
 
@@ -39,13 +42,14 @@ def detect_ec2(
             findings.append(_address(address, region, ctx))
 
     def run_volumes() -> None:
-        for volume in collect(ec2(), "describe_volumes", "Volumes"):
+        for volume in collect(ec2(), "describe_volumes", "Volumes", deadline=ctx.deadline):
             if not volume.get("Attachments"):
                 findings.append(_volume(volume, region, ctx))
 
     def run_images() -> None:
         nonlocal images_complete
-        images = collect(ec2(), "describe_images", "Images", Owners=["self"])
+        # Disabled AMIs are hidden by default but still pin their snapshots.
+        images = collect(ec2(), "describe_images", "Images", Owners=["self"], IncludeDisabled=True)
         # Complete the map before building findings so one malformed image cannot truncate it.
         for image in images:
             for mapping in image.get("BlockDeviceMappings", []):
@@ -58,7 +62,10 @@ def detect_ec2(
     def run_snapshots() -> None:
         # Fail closed: without a complete AMI map no snapshot can be proven unreferenced.
         known = ami_snapshots if images_complete else None
-        for snapshot in collect(ec2(), "describe_snapshots", "Snapshots", OwnerIds=["self"]):
+        snapshots = collect(
+            ec2(), "describe_snapshots", "Snapshots", deadline=ctx.deadline, OwnerIds=["self"]
+        )
+        for snapshot in snapshots:
             findings.append(_snapshot(snapshot, known, region, ctx))
 
     def run_vpc_endpoints() -> None:
@@ -68,7 +75,9 @@ def detect_ec2(
 
     def run_public_ipv4() -> None:
         # ENIs whose public IP carries an AllocationId are Elastic IPs, already reported.
-        enis = collect(ec2(), "describe_network_interfaces", "NetworkInterfaces")
+        enis = collect(
+            ec2(), "describe_network_interfaces", "NetworkInterfaces", deadline=ctx.deadline
+        )
         count = sum(
             1
             for eni in enis
@@ -210,7 +219,7 @@ def _image(image: dict, region: str, ctx: SweepContext) -> Finding:
 def _snapshot(
     snapshot: dict, ami_snapshots: dict[str, str] | None, region: str, ctx: SweepContext
 ) -> Finding:
-    """Self-owned snapshot; never a candidate when it backs an AMI or AMI references are unknown.
+    """Self-owned snapshot; never a candidate unless completed and proven unreferenced by AMIs.
 
     ``ami_snapshots`` is None when ``describe_images`` did not complete.
     """
@@ -226,11 +235,13 @@ def _snapshot(
         ami_blocker = f"backs AMI {image_id}" if image_id else None
         if ami_blocker:
             detail = f"{detail}, {ami_blocker}"
+    state = snapshot.get("State", "")
+    state_blocker = None if state == "completed" else f"state {state}"
     candidate, reason = _aged_verdict(
         tags,
         settings,
         age,
-        ami_blocker,
+        state_blocker or ami_blocker,
         f"{_lab_tag(settings)}, {age} days old, not referenced by any AMI",
     )
     return _finding(

@@ -84,20 +84,28 @@ def safe(
         )
 
 
-def collect(client, op: str, key: str, **params) -> list:
+def collect(client, op: str, key: str, *, deadline: float | None = None, **params) -> list:
     """Return every item under ``key`` for ``op``, following pagination when available.
 
     ``key`` may be a dotted path such as ``DistributionList.Items``; a missing
-    key yields no items for that page.
+    key yields no items for that page. With a ``deadline`` (epoch seconds) the
+    clock is checked before every page after the first, and ``TimeBudgetExceeded``
+    is raised once it has passed, so a long listing cannot eat the upload reserve.
     """
-    if client.can_paginate(op):
-        pages = client.get_paginator(op).paginate(**params)
-    else:
-        pages = [getattr(client, op)(**params)]
+    if not client.can_paginate(op):
+        return list(_dig(getattr(client, op)(**params), key))
+    pages = iter(client.get_paginator(op).paginate(**params))
     items: list = []
-    for page in pages:
+    first_page = True
+    while True:
+        # Paginators fetch lazily, so this check runs before the next page is requested.
+        if not first_page and deadline is not None and time.time() > deadline:
+            raise TimeBudgetExceeded(TIME_BUDGET_MESSAGE)
+        page = next(pages, None)
+        if page is None:
+            return items
         items.extend(_dig(page, key))
-    return items
+        first_page = False
 
 
 def _dig(data: dict, path: str) -> list:

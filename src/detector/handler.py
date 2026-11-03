@@ -35,7 +35,12 @@ ACTOR = "lambda:detector"
 GLOBAL_REGION = "global"
 MAX_WORKERS = 12
 # Seconds kept back from the Lambda timeout for the plan upload and the audit writes.
-UPLOAD_RESERVE_SECONDS = 45
+# The deadline is only checked between calls and pages, so one AWS call already in
+# flight when it passes can still stall for about 100 s: every client allows 4 total
+# attempts (max_attempts=3 retries, standard mode) of up to 25 s each (5 s connect +
+# 20 s read), plus the standard backoff between them. 120 s covers that worst case
+# and leaves room for the upload itself.
+UPLOAD_RESERVE_SECONDS = 120
 # Sweep budget when there is no Lambda context (local runs).
 LOCAL_BUDGET_SECONDS = 240
 SWEEP_SERVICE = "sweep"

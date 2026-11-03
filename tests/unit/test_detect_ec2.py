@@ -16,7 +16,7 @@ OPERATIONS = [
     ("describe_nat_gateways", {"Filter": [{"Name": "state", "Values": ["available"]}]}),
     ("describe_addresses", {}),
     ("describe_volumes", {}),
-    ("describe_images", {"Owners": ["self"]}),
+    ("describe_images", {"Owners": ["self"], "IncludeDisabled": True}),
     ("describe_snapshots", {"OwnerIds": ["self"]}),
     ("describe_vpc_endpoints", {}),
     ("describe_network_interfaces", {}),
@@ -72,13 +72,13 @@ def volume(vol_id, *, days=42, state="available", tags=LAB, **extra):
     }
 
 
-def snapshot(snap_id, *, days=42, size=8, tags=LAB):
+def snapshot(snap_id, *, days=42, size=8, tags=LAB, state="completed"):
     return {
         "SnapshotId": snap_id,
         "VolumeId": "vol-src",
         "VolumeSize": size,
         "StartTime": days_ago(days),
-        "State": "completed",
+        "State": state,
         "Tags": tags,
     }
 
@@ -208,6 +208,77 @@ def test_snapshots_fail_closed_when_second_images_page_fails(ec2_stub, ctx):
     assert snaps["snap-ami"].reason == "AMI references unknown"
     assert snaps["snap-old"].reason == "AMI references unknown"
     ec2_stub.assert_no_pending_responses()
+
+
+def test_snapshot_backing_a_disabled_ami_is_not_a_candidate(ec2_stub, ctx):
+    disabled = {
+        "ImageId": "ami-off",
+        "State": "disabled",
+        "BlockDeviceMappings": [{"Ebs": {"SnapshotId": "snap-off"}}],
+    }
+    stub_ec2(
+        ec2_stub,
+        responses={
+            "describe_images": {"Images": [disabled]},
+            "describe_snapshots": {"Snapshots": [snapshot("snap-off")]},
+        },
+    )
+    findings, errors = run(ctx)
+    assert errors == []
+    snap = by_id(findings, "ebs-snapshot")["snap-off"]
+    assert snap.candidate is False
+    assert snap.reason == "backs AMI ami-off"
+    ec2_stub.assert_no_pending_responses()
+
+
+def test_snapshot_must_be_completed_to_be_a_candidate(ec2_stub, ctx):
+    stub_ec2(
+        ec2_stub,
+        responses={
+            "describe_snapshots": {
+                "Snapshots": [
+                    snapshot("snap-pending", state="pending"),
+                    snapshot("snap-error", state="error"),
+                    snapshot("snap-done"),
+                ]
+            }
+        },
+    )
+    findings, _ = run(ctx)
+    snaps = by_id(findings, "ebs-snapshot")
+    assert [s for s, f in snaps.items() if f.candidate] == ["snap-done"]
+    assert snaps["snap-pending"].reason == "state pending"
+    assert snaps["snap-error"].reason == "state error"
+    ec2_stub.assert_no_pending_responses()
+
+
+def test_deadline_passing_between_snapshot_pages_records_time_budget(ec2_stub, ctx, monkeypatch):
+    def two_pages(stub, params):
+        page_one = {"Snapshots": [snapshot("snap-1")], "NextToken": "page2"}
+        stub.add_response("describe_snapshots", page_one, params)
+        page_two = {"Snapshots": [snapshot("snap-2")]}
+        stub.add_response("describe_snapshots", page_two, {**params, "NextToken": "page2"})
+
+    class LateClock:
+        @staticmethod
+        def time():
+            return ctx.deadline + 1
+
+    def expire_deadline(**_kwargs):
+        # From the first snapshot page on, the sweep clock reads past the deadline.
+        monkeypatch.setattr("detector.sweep.time", LateClock)
+
+    stub_ec2(ec2_stub, custom={"describe_snapshots": two_pages})
+    ec2_stub.client.meta.events.register("after-call.ec2.DescribeSnapshots", expire_deadline)
+    findings, errors = run(ctx)
+    assert "ebs-snapshot" not in {f.kind for f in findings}
+    assert [(e.service, e.classification) for e in errors] == [
+        ("ec2:DescribeSnapshots", "time-budget"),
+        ("ec2:DescribeVpcEndpoints", "time-budget"),
+        ("ec2:DescribeNetworkInterfaces", "time-budget"),
+    ]
+    # Still queued: the second snapshot page (never requested) and the two skipped calls.
+    assert len(ec2_stub._queue) == 3
 
 
 def test_client_creation_failure_is_recorded_not_raised(ctx_factory):

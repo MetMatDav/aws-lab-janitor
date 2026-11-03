@@ -315,7 +315,7 @@ def test_context_carries_account_audit_lookup_and_deadline(harness):
     assert all(c is ctx for c in harness.contexts)
     assert ctx.account == ACCOUNT
     assert ctx.was_proposed_live == harness.audit.was_proposed_live
-    assert before + 600 - 45 <= ctx.deadline <= after + 600 - 45
+    assert before + 600 - 120 <= ctx.deadline <= after + 600 - 120
     assert ctx.settings is harness.settings
     assert isinstance(ctx.log, logging.LoggerAdapter)
     assert ctx.log.extra == {"runId": harness.plan["runId"]}
