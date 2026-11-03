@@ -1,11 +1,13 @@
 """The claim-then-callback sequence that turns one human decision into a resumed execution.
 
+The caller has already parsed the request and, in link mode, checked the typed
+confirmation, so a refused request never writes.
+
 1. ``claim``: PENDING -> DECIDING (conditional), so two decisions cannot both win.
-2. Typed confirmation (link mode): a mismatch reverts the claim.
-3. Resume Step Functions with the task token: ``SendTaskSuccess`` on approve,
+2. Resume Step Functions with the task token: ``SendTaskSuccess`` on approve,
    ``SendTaskFailure`` (error ``Rejected``) on reject. ``TaskTimedOut`` marks the
    approval EXPIRED; any other failure reverts the claim so the human can retry.
-4. ``finalize``: DECIDING -> APPROVED / REJECTED.
+3. ``finalize``: DECIDING -> APPROVED / REJECTED.
 """
 
 import json
@@ -37,7 +39,6 @@ class Decision:
     decision: str
     approver: dict
     now: str
-    confirmed: bool = True
 
 
 def _resume(states: BaseClient, token: str, request: Decision) -> None:
@@ -71,10 +72,6 @@ def decide(
     except ExpiredError:
         log.info("approval expired, decision refused")
         return 410
-    if not request.confirmed:
-        store.revert(approval_id)
-        log.warning("confirmation code mismatch, claim reverted")
-        return 400
     try:
         _resume(states, token, request)
     except (ClientError, BotoCoreError) as error:

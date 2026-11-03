@@ -393,16 +393,16 @@ def test_post_accepts_confirmation_with_surrounding_whitespace_and_case(deps):
     assert response["statusCode"] == 200
 
 
-def test_post_wrong_confirmation_reverts_and_400(deps):
+def test_post_wrong_confirmation_is_400_without_any_write(deps):
     ddb, _ = deps
     stub_get(ddb, record_item())
-    ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
-    ddb.add_response("update_item", {}, revert_params())
 
     response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form(confirm="zzzz")))
 
     assert response["statusCode"] == 400
-    assert '<form method="post">' not in html_body(response)
+    body = html_body(response)
+    assert "confirmation code did not match" in body
+    assert '<form method="post">' not in body
 
 
 def test_post_unknown_id_is_404_without_claiming(deps):
@@ -414,7 +414,27 @@ def test_post_unknown_id_is_404_without_claiming(deps):
     assert response["statusCode"] == 404
 
 
+@pytest.mark.parametrize("status", ["APPROVED", "REJECTED", "DECIDING"])
+def test_post_on_decided_record_is_409_without_any_write(deps, status):
+    ddb, _ = deps
+    stub_get(ddb, record_item(status=status))
+
+    response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 409
+
+
+def test_post_on_decided_record_is_409_even_with_wrong_confirmation(deps):
+    ddb, _ = deps
+    stub_get(ddb, record_item(status="APPROVED"))
+
+    response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form(confirm="zzzz")))
+
+    assert response["statusCode"] == 409
+
+
 def test_second_post_is_409(deps):
+    """A concurrent decision wins between our read and our claim: the claim's conditional fails."""
     ddb, _ = deps
     stub_get(ddb, record_item())
     stub_claim_failure(ddb, LINK_APPROVER, record_item(status="APPROVED"))
@@ -424,10 +444,9 @@ def test_second_post_is_409(deps):
     assert response["statusCode"] == 409
 
 
-def test_post_on_expired_status_is_410(deps):
+def test_post_on_expired_status_is_410_without_any_write(deps):
     ddb, _ = deps
     stub_get(ddb, record_item(status="EXPIRED"))
-    stub_claim_failure(ddb, LINK_APPROVER, record_item(status="EXPIRED"))
 
     response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
 
@@ -437,6 +456,15 @@ def test_post_on_expired_status_is_410(deps):
 def test_post_after_expiry_is_410(deps):
     ddb, _ = deps
     stub_get(ddb, record_item(expires_at=NOW_ISO))
+
+    response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 410
+
+
+def test_post_expiring_between_read_and_claim_is_410(deps):
+    ddb, _ = deps
+    stub_get(ddb, record_item())
     stub_claim_failure(ddb, LINK_APPROVER, record_item(expires_at=NOW_ISO))
 
     response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
@@ -713,8 +741,6 @@ def test_responses_carry_hardening_headers(deps):
 def test_logs_never_contain_the_approval_id(deps, caplog):
     ddb, sfn = deps
     stub_get(ddb, record_item())
-    ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
-    ddb.add_response("update_item", {}, revert_params())
     stub_get(ddb, record_item())
     ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
     sfn.add_client_error(

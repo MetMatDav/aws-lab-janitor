@@ -1,8 +1,8 @@
 """Approval endpoint: API Gateway HTTP API (payload format 2.0) in front of one Lambda.
 
 Possession of the approval link is authority to approve, so the handler is
-strict about ordering: ``GET`` never writes; a ``POST`` is parsed (and, on the
-IAM route, its caller checked) before any write; the record is claimed
+strict about ordering: ``GET`` never writes; a ``POST`` is parsed and checked
+(the IAM caller, or the link's typed confirmation) before any write; the record is claimed
 (PENDING -> DECIDING) before Step Functions is resumed, so two decisions cannot
 both win; and the claim is reverted, expired or finalized depending on how the
 callback went (see ``approval.decision``). The approval id and the task token
@@ -23,7 +23,7 @@ from botocore.client import BaseClient
 
 from approval import page
 from approval.decision import DECISIONS, Decision, decide
-from shared.approvals import EXPIRED, PENDING, ApprovalStore, short_hash
+from shared.approvals import EXPIRED, PENDING, ApprovalRecord, ApprovalStore, short_hash
 from shared.plan_summary import render_summary
 
 logger = logging.getLogger("approval")
@@ -178,6 +178,17 @@ def _confirmation_matches(confirm: str, run_id: str) -> bool:
     return secrets.compare_digest(confirm.strip().casefold().encode(), expected.encode())
 
 
+def _closed_status(record: ApprovalRecord, now: str) -> int | None:
+    """410 or 409 if ``record`` no longer accepts a decision, else ``None``. Reads only."""
+    if record.status == EXPIRED:
+        return 410
+    if record.status != PENDING:
+        return 409
+    if record.expires_at <= now:
+        return 410
+    return None
+
+
 def _get_page(event: dict, approval_id: str, now: str, log: logging.LoggerAdapter) -> dict:
     """Read-only review page."""
     store, _ = build_dependencies()
@@ -185,18 +196,19 @@ def _get_page(event: dict, approval_id: str, now: str, log: logging.LoggerAdapte
     if found is None:
         return _html_status(404)
     record, _token = found
-    if record.status == EXPIRED:
-        return _html_status(410)
-    if record.status != PENDING:
-        return _html_status(409)
-    if record.expires_at <= now:
-        return _html_status(410)
+    closed = _closed_status(record, now)
+    if closed is not None:
+        return _html_status(closed)
     log.info("approval page served")
     return _respond(200, HTML, page.render_form(record, render_summary(record.plan_summary)))
 
 
 def _post_link(event: dict, approval_id: str, now: str, log: logging.LoggerAdapter) -> dict:
-    """Decision from the form on the review page, confirmed with the run id suffix."""
+    """Decision from the form on the review page, confirmed with the run id suffix.
+
+    A malformed form, a closed approval or a wrong confirmation is refused before
+    any write; the claim's own 409/410 still covers a concurrent decision.
+    """
     parsed = _parse_form(_body(event))
     if parsed is None:
         log.info("incomplete or malformed decision form")
@@ -206,6 +218,14 @@ def _post_link(event: dict, approval_id: str, now: str, log: logging.LoggerAdapt
     found = store.get(approval_id)
     if found is None:
         return _html_status(404)
+    record = found[0]
+    closed = _closed_status(record, now)
+    if closed is not None:
+        log.info("approval no longer pending, decision refused")
+        return _html_status(closed)
+    if not _confirmation_matches(confirm, record.run_id):
+        log.warning("confirmation code mismatch, decision refused")
+        return _html_status(400, WRONG_CONFIRMATION)
     http = event.get("requestContext", {}).get("http", {})
     approver = {
         "mode": "link",
@@ -213,12 +233,10 @@ def _post_link(event: dict, approval_id: str, now: str, log: logging.LoggerAdapt
         "userAgent": http.get("userAgent", ""),
         "at": now,
     }
-    confirmed = _confirmation_matches(confirm, found[0].run_id)
-    request = Decision(approval_id, decision, approver, now, confirmed)
-    status = decide(store, states, found, request, log)
+    status = decide(store, states, found, Decision(approval_id, decision, approver, now), log)
     if status == 200:  # noqa: PLR2004 - HTTP status
         return _respond(200, HTML, page.render_done(decision))
-    return _html_status(status, WRONG_CONFIRMATION if status == 400 else None)  # noqa: PLR2004
+    return _html_status(status)
 
 
 def _post_iam(event: dict, approval_id: str, now: str, log: logging.LoggerAdapter) -> dict:
