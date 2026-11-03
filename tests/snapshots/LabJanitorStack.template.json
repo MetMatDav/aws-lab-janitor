@@ -118,7 +118,18 @@
               ],
               "Condition": {
                 "StringNotEquals": {
-                  "aws:PrincipalArn": "arn:aws:iam::123456789012:root"
+                  "aws:PrincipalArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":iam::123456789012:root"
+                      ]
+                    ]
+                  }
                 }
               },
               "Effect": "Deny",
@@ -547,6 +558,26 @@
               "Condition": {
                 "ArnEquals": {
                   "aws:SourceArn": {
+                    "Ref": "NotificationsApprovalsTopic7B662042"
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "sns.amazonaws.com"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DlqD1FAA4AD",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "sqs:SendMessage",
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": {
                     "Ref": "NotificationsAlertsTopicDFE3487E"
                   }
                 }
@@ -666,6 +697,123 @@
       },
       "Type": "AWS::SNS::TopicPolicy"
     },
+    "NotificationsApprovalsEmailA5F6424C": {
+      "Properties": {
+        "Endpoint": "approver@example.com",
+        "Protocol": "email",
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": [
+              "DlqD1FAA4AD",
+              "Arn"
+            ]
+          }
+        },
+        "TopicArn": {
+          "Ref": "NotificationsApprovalsTopic7B662042"
+        }
+      },
+      "Type": "AWS::SNS::Subscription"
+    },
+    "NotificationsApprovalsTopic7B662042": {
+      "Properties": {
+        "DisplayName": "Lab Janitor Approvals",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::SNS::Topic"
+    },
+    "NotificationsApprovalsTopicPolicy668DB59D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Ref": "NotificationsApprovalsTopic7B662042"
+              },
+              "Sid": "AllowPublishThroughSSLOnly"
+            },
+            {
+              "Action": [
+                "sns:Subscribe",
+                "sns:SetTopicAttributes",
+                "sns:AddPermission",
+                "sns:RemovePermission"
+              ],
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:PrincipalArn": [
+                    {
+                      "Fn::Sub": "arn:${AWS::Partition}:iam::123456789012:role/cdk-hnb659fds-cfn-exec-role-123456789012-us-east-1"
+                    },
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          "arn:",
+                          {
+                            "Ref": "AWS::Partition"
+                          },
+                          ":iam::123456789012:root"
+                        ]
+                      ]
+                    }
+                  ]
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Ref": "NotificationsApprovalsTopic7B662042"
+              },
+              "Sid": "1"
+            },
+            {
+              "Action": "sns:Publish",
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:PrincipalArn": {
+                    "Fn::GetAtt": [
+                      "NotifierFunctionServiceRoleE31A96FF",
+                      "Arn"
+                    ]
+                  }
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Ref": "NotificationsApprovalsTopic7B662042"
+              },
+              "Sid": "2"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Topics": [
+          {
+            "Ref": "NotificationsApprovalsTopic7B662042"
+          }
+        ]
+      },
+      "Type": "AWS::SNS::TopicPolicy"
+    },
     "NotificationsReportsEmail06A09C1C": {
       "Properties": {
         "Endpoint": "test@example.com",
@@ -742,9 +890,16 @@
           "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
           "S3Key": "ASSET.zip"
         },
-        "Description": "Lab janitor notifier: publishes the weekly report",
+        "Description": "Lab janitor notifier: publishes the weekly report and approval requests",
         "Environment": {
           "Variables": {
+            "APPROVALS_TOPIC_ARN": {
+              "Ref": "NotificationsApprovalsTopic7B662042"
+            },
+            "APPROVAL_AUTH": "link",
+            "AUDIT_TABLE": {
+              "Ref": "AuditTable18A3095C"
+            },
             "PLANS_BUCKET": {
               "Ref": "AuditPlansBucketDEC41664"
             },
@@ -808,10 +963,37 @@
               }
             },
             {
+              "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem"
+              ],
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "APPROVAL#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            },
+            {
               "Action": "sns:Publish",
               "Effect": "Allow",
               "Resource": {
                 "Ref": "NotificationsReportsTopic7F0B91E5"
+              }
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "NotificationsApprovalsTopic7B662042"
               }
             }
           ],

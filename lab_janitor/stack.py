@@ -67,6 +67,10 @@ class LabJanitorStack(Stack):
             notifications=self.notifications,
             code=code,
         )
+        notifier_role = self.notifier.function.role
+        if notifier_role is None:  # Function always creates a role when none is passed in.
+            raise RuntimeError("notifier function has no execution role")
+        self.notifications.restrict_publishers(notifier_role.role_arn)
         self.workflow = Workflow(
             self,
             "Workflow",

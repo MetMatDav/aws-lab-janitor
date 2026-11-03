@@ -58,3 +58,62 @@ def test_invalid_min_age_days_is_rejected(value: object):
 def test_invalid_schedule_hour_is_rejected(value: object):
     with pytest.raises(ValueError, match=r"scheduleHour must be an integer in 0\.\.23"):
         _config(scheduleHour=value)
+
+
+ROLE_ARN = "arn:aws:iam::111122223333:role/LabJanitorApprover"
+
+
+@pytest.mark.parametrize("value", ["link", "iam", "both"])
+def test_approval_auth_accepts_the_three_modes(value: str):
+    context = {"approvalAuth": value}
+    if value != "link":
+        context["approverRoleArn"] = ROLE_ARN
+    assert _config(**context).approval_auth == value
+
+
+def test_approval_auth_defaults_to_link_without_a_role():
+    config = _config()
+    assert (config.approval_auth, config.approver_role_arn) == ("link", None)
+
+
+@pytest.mark.parametrize("value", ["LINK", "sso", "", 1])
+def test_approval_auth_rejects_other_values(value: object):
+    with pytest.raises(ValueError, match="approvalAuth"):
+        _config(approvalAuth=value, approverRoleArn=ROLE_ARN)
+
+
+@pytest.mark.parametrize("mode", ["iam", "both"])
+def test_iam_modes_require_a_valid_approver_role_arn(mode: str):
+    with pytest.raises(ValueError, match="approverRoleArn"):
+        _config(approvalAuth=mode)
+    for bad in ["not-an-arn", "arn:aws:iam::1234:role/x", "arn:aws:iam::111122223333:user/x"]:
+        with pytest.raises(ValueError, match="approverRoleArn"):
+            _config(approvalAuth=mode, approverRoleArn=bad)
+    gov = "arn:aws-us-gov:iam::111122223333:role/path/Approver"
+    assert _config(approvalAuth=mode, approverRoleArn=gov).approver_role_arn == gov
+
+
+def test_allowed_regions_from_comma_string_and_list():
+    assert _config(allowedRegions="us-east-1, eu-west-1").allowed_regions == (
+        "us-east-1",
+        "eu-west-1",
+    )
+    assert _config(allowedRegions=["us-gov-west-1", " ap-southeast-2 "]).allowed_regions == (
+        "us-gov-west-1",
+        "ap-southeast-2",
+    )
+    assert _config(allowedRegions="us-east-1,,").allowed_regions == ("us-east-1",)
+    assert _config(allowedRegions=[]).allowed_regions == ()
+    assert _config(allowedRegions="").allowed_regions == ()
+    assert _config().allowed_regions == ()
+
+
+@pytest.mark.parametrize("value", ["us-east", "US-EAST-1", "us-east-1;eu-west-1", ["us_east_1"], 7])
+def test_allowed_regions_rejects_malformed_entries(value: object):
+    with pytest.raises(ValueError, match="allowedRegions"):
+        _config(allowedRegions=value)
+
+
+def test_approval_email_defaults_to_report_email():
+    assert _config().approval_email == "test@example.com"
+    assert _config(approvalEmail="approver@example.com").approval_email == "approver@example.com"

@@ -10,6 +10,7 @@ from lab_janitor.nag import acknowledge
 
 RESOURCE_INDEX = "by-resource"
 PLANS_PREFIX = "plans/"
+APPROVAL_KEYS = {"ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["APPROVAL#*"]}}
 PLAN_EXPIRATION_DAYS = 400
 NONCURRENT_PLAN_EXPIRATION_DAYS = 30
 
@@ -80,7 +81,8 @@ class AuditStore(Construct):
         # up by hand (lifecycle expiration is not affected by bucket policies).
         # A Deny with "Principal": "*" also binds roles in this account that
         # hold s3:* through their identity policies.
-        root_arn = f"arn:aws:iam::{Stack.of(self).account}:root"
+        stack = Stack.of(self)
+        root_arn = f"arn:{stack.partition}:iam::{stack.account}:root"
         self.plans_bucket.add_to_resource_policy(
             iam.PolicyStatement(
                 effect=iam.Effect.DENY,
@@ -119,6 +121,43 @@ class AuditStore(Construct):
             actions=["dynamodb:PutItem"],
             resource_arns=[self.table.table_arn],
             conditions={"ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["RUN#*"]}},
+        )
+
+    def grant_approval_writes(self, grantee: iam.IGrantable) -> iam.Grant:
+        """Allow ``grantee`` to create approval records and refresh their task token.
+
+        ``PutItem`` creates the record; ``UpdateItem`` stores the new task
+        token when a retried request finds the record already there. Both are
+        limited to ``APPROVAL#...`` partitions.
+        """
+        return self._grant_approval_items(grantee, ["dynamodb:PutItem", "dynamodb:UpdateItem"])
+
+    def grant_approval_reads(self, grantee: iam.IGrantable) -> iam.Grant:
+        """Allow ``grantee`` to read single approval records."""
+        return self._grant_approval_items(grantee, ["dynamodb:GetItem"])
+
+    def grant_approval_updates(self, grantee: iam.IGrantable) -> iam.Grant:
+        """Allow ``grantee`` to update existing approval records (claim, decide, expire)."""
+        return self._grant_approval_items(grantee, ["dynamodb:UpdateItem"])
+
+    def _grant_approval_items(self, grantee: iam.IGrantable, actions: list[str]) -> iam.Grant:
+        return iam.Grant.add_to_principal(
+            grantee=grantee,
+            actions=actions,
+            resource_arns=[self.table.table_arn],
+            conditions=APPROVAL_KEYS,
+        )
+
+    def grant_plan_reads(self, grantee: iam.IGrantable) -> iam.Grant:
+        """Allow ``grantee`` to read plans and their versions under ``plans/``.
+
+        ``GetObjectVersion`` because consumers read the exact version the
+        detector reported, so what they act on always matches that run.
+        """
+        return iam.Grant.add_to_principal(
+            grantee=grantee,
+            actions=["s3:GetObject", "s3:GetObjectVersion"],
+            resource_arns=[self._plans_arn],
         )
 
     def grant_resource_queries(self, grantee: iam.IGrantable) -> iam.Grant:

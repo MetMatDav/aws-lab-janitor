@@ -16,7 +16,9 @@ SOURCE_DIR = ROOT / "src"
 @pytest.fixture(scope="session")
 def stack() -> LabJanitorStack:
     """Build the janitor stack once per session (jsii synthesis is slow)."""
-    app = cdk.App(context={"reportEmail": "test@example.com"})
+    app = cdk.App(
+        context={"reportEmail": "test@example.com", "approvalEmail": "approver@example.com"}
+    )
     return LabJanitorStack(app, "LabJanitorStack", env=ENV)
 
 
@@ -51,6 +53,7 @@ def cli_assembly(tmp_path_factory: pytest.TempPathFactory) -> Path:
         context={
             **json.loads((ROOT / "cdk.json").read_text())["context"],
             "reportEmail": "cli-test@example.org",
+            "approvalEmail": "cli-approver@example.net",
             "aws:cdk:enable-path-metadata": True,
         },
     )
