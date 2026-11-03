@@ -70,7 +70,8 @@ def test_rds_tag_marks_lab_without_prefix(rds_stub, ctx):
 
 def test_rds_instance_fields(rds_stub, ctx):
     stub_rds(rds_stub, instances=[db_instance("LAB-db"), db_instance("prod-db")])
-    findings, _ = run_detector(detect_rds, ctx)
+    findings, errors = run_detector(detect_rds, ctx)
+    assert errors == []
     instances = by_id(findings, "rds-instance")
     lab = instances["LAB-db"]
     assert lab.lab is True and lab.candidate is False and lab.reason == ""
@@ -83,7 +84,8 @@ def test_rds_instance_fields(rds_stub, ctx):
 
 def test_headless_cluster_is_reported(rds_stub, ctx):
     stub_rds(rds_stub, clusters=[db_cluster("LAB-aurora")])
-    findings, _ = run_detector(detect_rds, ctx)
+    findings, errors = run_detector(detect_rds, ctx)
+    assert errors == []
     finding = by_id(findings, "rds-cluster")["LAB-aurora"]
     assert finding.kind == "rds-cluster" and finding.detail.startswith("no instances")
     assert finding.detail.startswith("no instances: storage and backups still billed")
@@ -94,7 +96,8 @@ def test_headless_cluster_is_reported(rds_stub, ctx):
 
 def test_cluster_with_members_and_tags(rds_stub, ctx):
     stub_rds(rds_stub, clusters=[db_cluster("aurora-demo", members=["a", "b"], tags=LAB)])
-    findings, _ = run_detector(detect_rds, ctx)
+    findings, errors = run_detector(detect_rds, ctx)
+    assert errors == []
     finding = by_id(findings, "rds-cluster")["aurora-demo"]
     assert finding.detail == "aurora-postgresql available 2 instances"
     assert finding.lab is True and finding.candidate is False and finding.reason == ""

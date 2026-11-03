@@ -69,7 +69,8 @@ def test_lab_monitor_is_candidate(im_stub, ctx):
 def test_monitor_without_prefix_skips_tag_lookup(im_stub, ctx):
     # Only LAB- monitors get a tag lookup; the Stubber fails on any unexpected call.
     stub_monitors(im_stub, [monitor("watch-demo")])
-    findings, _ = run_detector(detect_internet_monitor, ctx)
+    findings, errors = run_detector(detect_internet_monitor, ctx)
+    assert errors == []
     finding = by_id(findings, "internet-monitor")["watch-demo"]
     assert finding.lab is False and finding.candidate is False
     im_stub.assert_no_pending_responses()
@@ -95,7 +96,8 @@ def test_candidate_reason_uses_configured_prefix(im_stub, ctx_factory, ctx):
     settings = replace(ctx.settings, name_prefix="TMP-")
     stub_monitors(im_stub, [monitor("TMP-watch"), monitor("LAB-watch")])
     stub_monitor_tags(im_stub, "TMP-watch", {})
-    findings, _ = run_detector(detect_internet_monitor, ctx_factory(settings=settings))
+    findings, errors = run_detector(detect_internet_monitor, ctx_factory(settings=settings))
+    assert errors == []
     monitors = by_id(findings, "internet-monitor")
     assert monitors["TMP-watch"].reason == "name prefix TMP-"
     assert monitors["LAB-watch"].candidate is False
