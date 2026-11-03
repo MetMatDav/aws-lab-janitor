@@ -1,7 +1,6 @@
 """SNS topics for the weekly report and for operational alerts."""
 
 from aws_cdk import aws_sns as sns
-from aws_cdk import aws_sns_subscriptions as subs
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
@@ -28,9 +27,22 @@ class Notifications(Construct):
             self, "AlertsTopic", display_name="Lab Janitor Alerts", enforce_ssl=True
         )
 
-        self.reports_topic.add_subscription(
-            subs.EmailSubscription(config.report_email, dead_letter_queue=dlq)
+        # Fixed construct ids: topic.add_subscription would name the
+        # subscription after the address, leaking it into logical ids and
+        # aws:cdk:path metadata.
+        sns.Subscription(
+            self,
+            "ReportsEmail",
+            topic=self.reports_topic,
+            protocol=sns.SubscriptionProtocol.EMAIL,
+            endpoint=config.report_email,
+            dead_letter_queue=dlq,
         )
-        self.alerts_topic.add_subscription(
-            subs.EmailSubscription(config.alert_email, dead_letter_queue=dlq)
+        sns.Subscription(
+            self,
+            "AlertsEmail",
+            topic=self.alerts_topic,
+            protocol=sns.SubscriptionProtocol.EMAIL,
+            endpoint=config.alert_email,
+            dead_letter_queue=dlq,
         )

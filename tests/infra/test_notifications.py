@@ -49,3 +49,16 @@ def test_dlq_is_encrypted_and_ssl_only(template: assertions.Template):
 
     queue_policies = template.find_resources("AWS::SQS::QueuePolicy")
     assert _ssl_deny_statements(queue_policies, "PolicyDocument")
+
+
+def test_no_logical_id_or_path_contains_email(cli_template: dict):
+    resources = cli_template["Resources"]
+    paths = [
+        resource.get("Metadata", {}).get("aws:cdk:path", "") for resource in resources.values()
+    ]
+    assert any(paths), "path metadata must be enabled for this check to mean anything"
+    for logical_id in resources:
+        assert "@" not in logical_id, logical_id
+        assert "exampleorg" not in logical_id.lower(), logical_id
+    for path in paths:
+        assert "@" not in path, path
