@@ -65,9 +65,22 @@ def test_detector_role_has_no_mutating_actions_outside_its_bucket_and_table(
     assert statements
     for st in statements:
         for a in actions(st):
-            if a.startswith(("s3:PutObject", "dynamodb:PutItem")):
+            if a in {"s3:PutObject", "dynamodb:PutItem"}:
                 continue
             assert not a.split(":")[1].startswith(MUTATING_PREFIXES), a
+
+
+def test_detector_role_action_set_is_exact(template: assertions.Template):
+    granted = {a for st in detector_statements(template) for a in actions(st)}
+    assert granted == DETECTOR_READ_ACTIONS | {"s3:PutObject", "dynamodb:PutItem", "dynamodb:Query"}
+
+
+def test_detector_role_managed_policies_are_only_basic_execution(template: assertions.Template):
+    role = template.find_resources("AWS::IAM::Role")[function_role_id(template, DETECTOR_HANDLER)]
+    (managed,) = role["Properties"]["ManagedPolicyArns"]
+    # The partition is a Ref, so the ARN is an Fn::Join whose last part is a literal.
+    arn_tail = managed if isinstance(managed, str) else managed["Fn::Join"][1][-1]
+    assert arn_tail.endswith("service-role/AWSLambdaBasicExecutionRole")
 
 
 def test_detector_read_actions_are_exactly_the_listed_set(template: assertions.Template):
