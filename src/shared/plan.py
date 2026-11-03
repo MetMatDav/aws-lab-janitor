@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import uuid
 from datetime import UTC, datetime
 
@@ -17,8 +18,8 @@ def new_run_id(now: datetime) -> str:
     return f"{now.astimezone(UTC).strftime(RUN_ID_TIME_FORMAT)}-{uuid.uuid4().hex[:4]}"
 
 
-def _finding_key(finding: Finding) -> tuple[str, str, str]:
-    return (finding.region, finding.kind, finding.resource_id)
+def _finding_key(finding: Finding) -> tuple[str, str, str, str]:
+    return (finding.region, finding.kind, finding.resource_id, finding.arn or "")
 
 
 def _error_key(error: ErrorFinding) -> tuple[str, str, str, str]:
@@ -41,7 +42,11 @@ def build_plan(  # noqa: PLR0913, PLR0917
     in which the detectors reported them.
     """
     ordered = sorted(findings, key=_finding_key)
-    costs = [f.estimated_monthly_usd for f in findings if f.estimated_monthly_usd is not None]
+    # fsum over the sorted findings: the total is exact and independent of input order;
+    # starting from 0.0 keeps an empty plan's total a float.
+    total = math.fsum(
+        [0.0, *(f.estimated_monthly_usd for f in ordered if f.estimated_monthly_usd is not None)]
+    )
     return {
         "runId": run_id,
         "generatedAt": generated_at.astimezone(UTC).isoformat(),
@@ -57,7 +62,7 @@ def build_plan(  # noqa: PLR0913, PLR0917
         "candidates": [f.to_dict() for f in ordered if f.candidate],
         "inventory": [f.to_dict() for f in ordered if not f.candidate],
         "errors": [e.to_dict() for e in sorted(errors, key=_error_key)],
-        "estimatedMonthlyUsd": round(sum(costs), 2),
+        "estimatedMonthlyUsd": round(total, 2),
         "pricesAsOf": PRICES_AS_OF,
         "pricesRegion": PRICES_REGION,
     }

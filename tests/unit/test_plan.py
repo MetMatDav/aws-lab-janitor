@@ -143,3 +143,18 @@ def test_plan_live_mode_and_empty_cost():
     plan = build_plan("r", live, [finding("x", estimated_monthly_usd=None)], [], [], NOW)
     assert plan["dryRun"] is False
     assert plan["estimatedMonthlyUsd"] == 0
+
+
+def test_empty_plan_cost_serializes_as_float_zero():
+    plan = make_plan([], [])
+    assert isinstance(plan["estimatedMonthlyUsd"], float)
+    assert b'"estimatedMonthlyUsd":0.0' in plan_bytes(plan)
+
+
+def test_arn_breaks_ties_between_same_region_kind_and_id():
+    first = finding("dup", arn="arn:aws:ec2:us-east-1:1:a")
+    second = finding("dup", arn="arn:aws:ec2:us-east-1:1:b")
+    forward = make_plan([second, first], [])
+    backward = make_plan([first, second], [])
+    assert [c["arn"] for c in forward["candidates"]] == [first.arn, second.arn]
+    assert plan_bytes(forward) == plan_bytes(backward)
