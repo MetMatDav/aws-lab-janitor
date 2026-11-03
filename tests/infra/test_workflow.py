@@ -57,6 +57,37 @@ CONDITIONAL_CHECK_CATCH = "DynamoDB.ConditionalCheckFailedException"
 # Where the DynamoDB states put their response (jsii cannot render a null
 # ResultPath in raw ASL); it must not overwrite anything a later state reads.
 RECORD_RESULT_PATH = "$.recordResult"
+DYNAMODB_STATES = (
+    "RecordRejected",
+    "MirrorRejected",
+    "RecordExpired",
+    "MirrorExpired",
+    "RecordApplied",
+)
+DYNAMODB_RETRY = {
+    "ErrorEquals": [
+        "DynamoDB.ProvisionedThroughputExceededException",
+        "DynamoDB.ThrottlingException",
+        "DynamoDB.InternalServerErrorException",
+    ],
+    "IntervalSeconds": 2,
+    "MaxAttempts": 3,
+    "BackoffRate": 2,
+}
+
+
+def _dynamodb_catches(next_state: str) -> list[dict]:
+    """The conditional-failure catch first, then everything else to NotifyFailure."""
+    return [
+        {
+            "ErrorEquals": [CONDITIONAL_CHECK_CATCH],
+            "ResultPath": "$.recordError",
+            "Next": next_state,
+        },
+        {"ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "NotifyFailure"},
+    ]
+
+
 FORBIDDEN_PREFIXES = ("Delete", "Release", "Terminate")
 TOO_MANY_REQUESTS_RETRY = {
     "ErrorEquals": ["Lambda.TooManyRequestsException"],
@@ -224,9 +255,7 @@ def test_record_states_are_conditional_and_catch_conditional_failures(
         },
     }
     assert state["ResultPath"] == RECORD_RESULT_PATH
-    assert state["Catch"] == [
-        {"ErrorEquals": [CONDITIONAL_CHECK_CATCH], "ResultPath": "$.recordError", "Next": mirror}
-    ]
+    assert state["Catch"] == _dynamodb_catches(mirror)
     assert state["Next"] == mirror
 
 
@@ -260,14 +289,24 @@ def test_mirror_items_are_conditional_puts_under_run_partition(
         "ConditionExpression": "attribute_not_exists(pk) AND attribute_not_exists(sk)",
     }
     assert state["ResultPath"] == RECORD_RESULT_PATH
-    assert state["Catch"] == [
-        {
-            "ErrorEquals": [CONDITIONAL_CHECK_CATCH],
-            "ResultPath": "$.recordError",
-            "Next": next_state,
-        }
-    ]
+    assert state["Catch"] == _dynamodb_catches(next_state)
     assert state["Next"] == next_state
+
+
+@pytest.mark.parametrize("state_name", DYNAMODB_STATES)
+def test_dynamodb_states_retry_transient_errors_and_alert_on_the_rest(
+    template: assertions.Template, state_name: str
+):
+    state = state_machine_definition(template)["States"][state_name]
+    assert state["Retry"] == [DYNAMODB_RETRY]
+    (conditional, catch_all) = state["Catch"]
+    assert conditional["ErrorEquals"] == [CONDITIONAL_CHECK_CATCH]
+    assert conditional["Next"] == state["Next"]
+    assert catch_all == {
+        "ErrorEquals": ["States.ALL"],
+        "ResultPath": "$.error",
+        "Next": "NotifyFailure",
+    }
 
 
 def test_record_result_path_is_read_by_no_state(template: assertions.Template):

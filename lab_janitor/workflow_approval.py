@@ -11,7 +11,8 @@ three ways:
 ``Record*`` closes the approval record if it is still undecided, ``Mirror*``
 and ``RecordApplied`` append the outcome as a ``RUN#`` audit event. All five
 are conditional writes; a conditional failure means the item is already
-there, so the run carries on.
+there, so the run carries on. Throttling and DynamoDB server errors are
+retried; anything else goes to ``NotifyFailure`` like every other task.
 
 The DynamoDB states are raw ASL (``CustomState``): the CDK DynamoDB task
 constructs grant UpdateItem/PutItem on the whole table without a
@@ -33,6 +34,11 @@ from constructs import Construct
 THROTTLE_ERRORS = ["Lambda.TooManyRequestsException"]
 APPROVAL_TIMEOUT = Duration.hours(72)
 CONDITIONAL_CHECK_FAILED = ["DynamoDB.ConditionalCheckFailedException"]
+DYNAMODB_TRANSIENT_ERRORS = [
+    "DynamoDB.ProvisionedThroughputExceededException",
+    "DynamoDB.ThrottlingException",
+    "DynamoDB.InternalServerErrorException",
+]
 
 APPROVAL_ID = "$.approvalRequest.approvalId"
 APPROVAL_KEY = f"States.Format('APPROVAL#{{}}', {APPROVAL_ID})"
@@ -146,7 +152,7 @@ class ApprovalBranch:
             "$.apply",
             approvedBy={"S.$": "States.JsonToString($.approval.approvedBy)"},
         )
-        _continue_to(record_applied, notify_result)
+        self._continue_to(record_applied, notify_result)
 
         return new_approval_id.next(request_approval).next(apply).next(record_applied)
 
@@ -159,9 +165,9 @@ class ApprovalBranch:
         )
         notify.next(sfn.Succeed(self._scope, outcome))
         mirror = self._run_event(f"Mirror{outcome}", status, "$.error")
-        _continue_to(mirror, notify)
+        self._continue_to(mirror, notify)
         record = self._record_decision(f"Record{outcome}", status)
-        _continue_to(record, mirror)
+        self._continue_to(record, mirror)
         return record
 
     def _notify(self, name: str, mode: str, paths: dict[str, str]) -> tasks.LambdaInvoke:
@@ -223,7 +229,7 @@ class ApprovalBranch:
         )
 
     def _dynamodb_task(self, name: str, action: str, parameters: dict) -> sfn.CustomState:
-        return sfn.CustomState(
+        state = sfn.CustomState(
             self._scope,
             name,
             state_json={
@@ -233,9 +239,19 @@ class ApprovalBranch:
                 "ResultPath": RECORD_RESULT_PATH,
             },
         )
+        state.add_retry(
+            errors=DYNAMODB_TRANSIENT_ERRORS,
+            interval=Duration.seconds(2),
+            backoff_rate=2,
+            max_attempts=3,
+        )
+        return state
 
+    def _continue_to(self, state: sfn.CustomState, next_state: sfn.IChainable) -> None:
+        """Go on to ``next_state`` whether the conditional write happened or was already done.
 
-def _continue_to(state: sfn.CustomState, next_state: sfn.IChainable) -> None:
-    """Go on to ``next_state`` whether the conditional write happened or was already done."""
-    state.add_catch(next_state, errors=CONDITIONAL_CHECK_FAILED, result_path="$.recordError")
-    state.next(next_state)
+        The conditional catch comes first; any other error is a failed run.
+        """
+        state.add_catch(next_state, errors=CONDITIONAL_CHECK_FAILED, result_path="$.recordError")
+        state.add_catch(self._notify_failure, errors=[sfn.Errors.ALL], result_path="$.error")
+        state.next(next_state)
