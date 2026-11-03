@@ -52,8 +52,9 @@ LAB_TAG_LOCK_REASON = (
     "and the keep-tag Deny"
 )
 LAB_NAME_LOCK_REASON = (
-    "Resource names are unknown at deploy time; the grant is limited to the LAB- name prefix "
-    "and the keep-tag Deny"
+    "Resource names are unknown at deploy time; the grant is limited to the LAB- name prefix, "
+    "and kept resources are excluded by the executor's re-verification (the keep-tag Deny is "
+    "verified in Plan 3)"
 )
 
 

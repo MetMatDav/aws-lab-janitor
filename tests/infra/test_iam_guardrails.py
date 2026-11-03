@@ -22,7 +22,6 @@ from tests.infra.helpers import (
     resources,
     role_statements,
     state_machine_role_id,
-    statements_of_role,
 )
 
 MUTATING_PREFIXES = (
@@ -216,11 +215,43 @@ def any_template(request: pytest.FixtureRequest) -> assertions.Template:
     return request.getfixturevalue(request.param)
 
 
-def _statements_by_role(template: assertions.Template) -> dict[str, list[dict]]:
-    return {
-        role_id: statements_of_role(template, role_id)
-        for role_id in template.find_resources("AWS::IAM::Role")
-    }
+def _role_refs(value: object) -> str | None:
+    """The logical id a ``Ref`` or ``Fn::GetAtt`` points to, if any."""
+    if isinstance(value, dict) and "Ref" in value:
+        return value["Ref"]
+    if isinstance(value, dict) and "Fn::GetAtt" in value:
+        return value["Fn::GetAtt"][0]
+    return None
+
+
+def _all_policy_statements(template: assertions.Template) -> list[tuple[str, set[str], dict]]:
+    """Every statement of every policy document in the template, whatever the resource type.
+
+    Reads ``Properties.PolicyDocument`` (IAM policies and the S3, SNS and SQS
+    resource policies) and ``Properties.Policies[*].PolicyDocument`` (inline
+    role policies). Each statement comes with the logical id of the resource
+    holding it and the roles it is granted to: the attached roles of an
+    ``AWS::IAM::Policy``, the role itself for an inline policy, and no role
+    for a resource policy.
+    """
+    found = []
+    for logical_id, resource in template.to_json()["Resources"].items():
+        properties = resource.get("Properties", {})
+        documents = []
+        if "PolicyDocument" in properties:
+            if resource["Type"] == "AWS::IAM::Policy":
+                roles = {_role_refs(role) for role in properties.get("Roles", [])}
+            else:
+                roles = set()
+            documents.append((properties["PolicyDocument"], roles))
+        for policy in properties.get("Policies", []):
+            roles = {logical_id} if resource["Type"] == "AWS::IAM::Role" else set()
+            documents.append((policy["PolicyDocument"], roles))
+        for document, roles in documents:
+            statements = document.get("Statement", [])
+            for statement in [statements] if isinstance(statements, dict) else statements:
+                found.append((logical_id, roles, statement))
+    return found
 
 
 def _is_delete(action: str) -> bool:
@@ -228,12 +259,26 @@ def _is_delete(action: str) -> bool:
 
 
 def test_every_policy_is_attached_to_a_role_only(any_template: assertions.Template):
-    # So the per-role checks below see every statement in the template.
+    # So the per-role checks below see every identity statement in the template.
+    assert not any_template.find_resources("AWS::IAM::ManagedPolicy")
     for policy in any_template.find_resources("AWS::IAM::Policy").values():
         properties = policy["Properties"]
         assert properties.get("Roles")
         assert "Users" not in properties
         assert "Groups" not in properties
+
+
+def test_policy_scan_covers_identity_and_resource_policies(any_template: assertions.Template):
+    holders = {
+        any_template.to_json()["Resources"][logical_id]["Type"]
+        for logical_id, _, _ in _all_policy_statements(any_template)
+    }
+    assert {
+        "AWS::IAM::Policy",
+        "AWS::S3::BucketPolicy",
+        "AWS::SNS::TopicPolicy",
+        "AWS::SQS::QueuePolicy",
+    } <= holders
 
 
 def test_delete_allows_belong_to_the_executor_or_are_log_delivery(
@@ -242,18 +287,17 @@ def test_delete_allows_belong_to_the_executor_or_are_log_delivery(
     executor_role = function_role_id(any_template, EXECUTOR_HANDLER)
     machine_role = state_machine_role_id(any_template)
     executor_deletes = set()
-    for role_id, statements in _statements_by_role(any_template).items():
-        for st in statements:
-            if st["Effect"] != "Allow":
-                continue
-            deletes = {a for a in actions(st) if _is_delete(a)}
-            if not deletes:
-                continue
-            if role_id == executor_role:
-                executor_deletes |= deletes
-                continue
-            assert role_id == machine_role, (role_id, deletes)
-            assert deletes == {"logs:DeleteLogDelivery"}, deletes
+    for logical_id, roles, st in _all_policy_statements(any_template):
+        if st["Effect"] != "Allow":
+            continue
+        deletes = {a for a in actions(st) if _is_delete(a)}
+        if not deletes:
+            continue
+        if roles == {executor_role}:
+            executor_deletes |= deletes
+            continue
+        assert roles == {machine_role}, (logical_id, roles, deletes)
+        assert deletes == {"logs:DeleteLogDelivery"}, (logical_id, deletes)
     assert executor_deletes == {a for a in EXECUTOR_MUTATING_ACTIONS if _is_delete(a)}
 
 
@@ -325,12 +369,11 @@ def test_dynamodb_grants_carry_leading_keys_except_query(any_template: assertion
 def test_task_callbacks_only_on_the_approval_handler(any_template: assertions.Template):
     approval_role = function_role_id(any_template, APPROVAL_HANDLER)
     found = False
-    for role_id, statements in _statements_by_role(any_template).items():
-        for st in statements:
-            if not any(a.startswith("states:SendTask") for a in actions(st)):
-                continue
-            assert role_id == approval_role, role_id
-            assert st["Effect"] == "Allow"
-            assert st["Resource"] == "*"
-            found = True
+    for logical_id, roles, st in _all_policy_statements(any_template):
+        if not any(a.startswith("states:SendTask") for a in actions(st)):
+            continue
+        assert roles == {approval_role}, (logical_id, roles)
+        assert st["Effect"] == "Allow"
+        assert st["Resource"] == "*"
+        found = True
     assert found
