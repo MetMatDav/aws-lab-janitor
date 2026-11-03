@@ -117,3 +117,17 @@ def test_allowed_regions_rejects_malformed_entries(value: object):
 def test_approval_email_defaults_to_report_email():
     assert _config().approval_email == "test@example.com"
     assert _config(approvalEmail="approver@example.com").approval_email == "approver@example.com"
+
+
+@pytest.mark.parametrize("key", ["reportEmail", "alertEmail", "approvalEmail"])
+@pytest.mark.parametrize("value", ["TU_CORREO", "you@example", "@example.com", "a b@example.com"])
+def test_placeholder_or_malformed_email_is_rejected_at_synth(key: str, value: str):
+    """A placeholder left in the deploy command must fail at synth, not in CloudFormation.
+
+    SNS rejects a malformed subscription endpoint only at deploy time, which
+    costs a full stack rollback.
+    """
+    context = {"reportEmail": "test@example.com", key: value}
+
+    with pytest.raises(ValueError, match=f"{key} must be an email address"):
+        JanitorConfig.from_node(cdk.App(context=context).node)

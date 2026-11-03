@@ -23,6 +23,7 @@ APPROVAL_AUTH_MODES = ("link", "iam", "both")
 DEFAULT_APPROVAL_AUTH = "link"
 _REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
 _ROLE_ARN = re.compile(r"^arn:aws[a-z-]*:iam::\d{12}:role/.+$")
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _context(node: Node, key: str, default: Any) -> Any:
@@ -83,6 +84,19 @@ def _regions(value: Any) -> tuple[str, ...]:
     return regions
 
 
+def _email(key: str, value: Any) -> str:
+    """Check an email context value has the shape ``local@domain.tld``.
+
+    SNS rejects a malformed subscription endpoint only at deploy time, after
+    CloudFormation has started the update, so a placeholder left in the
+    deploy command (``-c reportEmail=TU_CORREO``) would cost a full rollback.
+    Failing here keeps the mistake inside ``cdk synth``.
+    """
+    if not isinstance(value, str) or not _EMAIL.match(value):
+        raise ValueError(f"{key} must be an email address such as you@example.com, got {value!r}")
+    return value
+
+
 def _approval_auth(value: Any) -> str:
     """Check ``approvalAuth`` is one of the supported modes."""
     if value not in APPROVAL_AUTH_MODES:
@@ -133,9 +147,11 @@ class JanitorConfig:
 
         approval_auth = _approval_auth(_context(node, "approvalAuth", DEFAULT_APPROVAL_AUTH))
         return cls(
-            report_email=report_email,
-            alert_email=node.try_get_context("alertEmail") or report_email,
-            approval_email=node.try_get_context("approvalEmail") or report_email,
+            report_email=_email("reportEmail", report_email),
+            alert_email=_email("alertEmail", node.try_get_context("alertEmail") or report_email),
+            approval_email=_email(
+                "approvalEmail", node.try_get_context("approvalEmail") or report_email
+            ),
             dry_run=_flag(node.try_get_context("dryRun"), default=True),
             min_age_days=_int_in_range(
                 "minAgeDays", _context(node, "minAgeDays", DEFAULT_MIN_AGE_DAYS), 0

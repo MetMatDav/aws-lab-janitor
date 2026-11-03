@@ -424,3 +424,18 @@ in dry-run", then start another manual run.
 The account's Lambda concurrency quota is too low to reserve concurrency. See
 [Account quotas](#account-quotas) and deploy with `-c reservedConcurrency=false`
 until the quota is raised.
+
+### Deploy fails with "Invalid parameter: Email address" on an SNS subscription
+
+The deploy command was run with a placeholder (for example `-c
+reportEmail=you@example.com` copied verbatim, or an unexpanded shell variable)
+instead of a real address. SNS validates the endpoint only when CloudFormation
+creates or replaces the subscription, so every other change in that update is
+cancelled and the stack rolls back to `UPDATE_ROLLBACK_COMPLETE`. Nothing is
+lost: the previous subscriptions and functions stay as they were, and the stack
+can be deployed again as soon as it reaches that status.
+
+Since Plan 2, `cdk synth` refuses an email that is not shaped like
+`local@domain.tld` ("reportEmail must be an email address such as
+you@example.com"), so the mistake now stops before CloudFormation. Fix the
+command and deploy again.
