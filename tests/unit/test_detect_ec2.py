@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from botocore.exceptions import UnknownServiceError
 from botocore.stub import Stubber
 
 from detector.detectors.ec2 import detect_ec2
@@ -35,11 +36,21 @@ EMPTY = {
 }
 
 
-def stub_ec2(stub: Stubber, responses: dict | None = None, failures: dict | None = None) -> None:
-    """Queue one response per EC2 call, in detector order, with the exact expected parameters."""
-    responses, failures = responses or {}, failures or {}
+def stub_ec2(
+    stub: Stubber,
+    responses: dict | None = None,
+    failures: dict | None = None,
+    custom: dict | None = None,
+) -> None:
+    """Queue one response per EC2 call, in detector order, with the exact expected parameters.
+
+    ``custom`` maps an operation to ``fn(stub, params)`` that queues its own sequence (e.g. pages).
+    """
+    responses, failures, custom = responses or {}, failures or {}, custom or {}
     for op, params in OPERATIONS:
-        if op in failures:
+        if op in custom:
+            custom[op](stub, params)
+        elif op in failures:
             stub.add_client_error(
                 op, service_error_code=failures[op], http_status_code=403, expected_params=params
             )
@@ -162,7 +173,7 @@ def test_snapshot_rules(ec2_stub, ctx):
     ec2_stub.assert_no_pending_responses()
 
 
-def test_snapshots_still_processed_when_images_fail(ec2_stub, ctx):
+def test_snapshots_fail_closed_when_images_fail(ec2_stub, ctx):
     stub_ec2(
         ec2_stub,
         responses={"describe_snapshots": {"Snapshots": [snapshot("snap-old")]}},
@@ -170,8 +181,57 @@ def test_snapshots_still_processed_when_images_fail(ec2_stub, ctx):
     )
     findings, errors = run(ctx)
     assert [e.service for e in errors] == ["ec2:DescribeImages"]
-    assert by_id(findings, "ebs-snapshot")["snap-old"].candidate is True
+    snap = by_id(findings, "ebs-snapshot")["snap-old"]
+    assert snap.lab is True
+    assert snap.candidate is False
+    assert snap.reason == "AMI references unknown"
     ec2_stub.assert_no_pending_responses()
+
+
+def test_snapshots_fail_closed_when_second_images_page_fails(ec2_stub, ctx):
+    def images_then_failure(stub, params):
+        first_page = {
+            "Images": [
+                {
+                    "ImageId": "ami-1",
+                    "BlockDeviceMappings": [{"Ebs": {"SnapshotId": "snap-ami"}}],
+                }
+            ],
+            "NextToken": "page2",
+        }
+        stub.add_response("describe_images", first_page, params)
+        stub.add_client_error(
+            "describe_images",
+            service_error_code="RequestLimitExceeded",
+            http_status_code=503,
+            expected_params={**params, "NextToken": "page2"},
+        )
+
+    stub_ec2(
+        ec2_stub,
+        responses={
+            "describe_snapshots": {"Snapshots": [snapshot("snap-ami"), snapshot("snap-old")]}
+        },
+        custom={"describe_images": images_then_failure},
+    )
+    findings, errors = run(ctx)
+    assert [(e.service, e.classification) for e in errors] == [("ec2:DescribeImages", "throttled")]
+    snaps = by_id(findings, "ebs-snapshot")
+    assert [s for s, f in snaps.items() if f.candidate] == []
+    assert snaps["snap-ami"].reason == "AMI references unknown"
+    assert snaps["snap-old"].reason == "AMI references unknown"
+    ec2_stub.assert_no_pending_responses()
+
+
+def test_client_creation_failure_is_recorded_not_raised(ctx_factory):
+    class BrokenClients:
+        def get(self, service, region):
+            raise UnknownServiceError(service_name=service, known_service_names="s3")
+
+    findings, errors = run(ctx_factory(clients=BrokenClients()))
+    assert findings == []
+    assert len(errors) == len(OPERATIONS)
+    assert {e.classification for e in errors} == {"service-unavailable-in-region"}
 
 
 def test_volume_rules(ec2_stub, ctx):

@@ -15,49 +15,59 @@ def detect_ec2(
     region: str, ctx: SweepContext, findings: list[Finding], errors: list[ErrorFinding]
 ) -> None:
     """Inspect the EC2 family in ``region``, isolating every API call in its own ``safe`` block."""
-    ec2 = ctx.clients.get("ec2", region)
     ami_snapshots: dict[str, str] = {}
+    images_complete = False
+
+    def ec2():
+        # Fetched inside each safe block so a client-creation failure is recorded, not raised.
+        return ctx.clients.get("ec2", region)
 
     def run_instances() -> None:
         filters = [{"Name": "instance-state-name", "Values": NOT_TERMINATED_STATES}]
-        for reservation in collect(ec2, "describe_instances", "Reservations", Filters=filters):
+        for reservation in collect(ec2(), "describe_instances", "Reservations", Filters=filters):
             for instance in reservation.get("Instances", []):
                 findings.append(_instance(instance, region, ctx))
 
     def run_nat_gateways() -> None:
         state = [{"Name": "state", "Values": ["available"]}]
-        for nat in collect(ec2, "describe_nat_gateways", "NatGateways", Filter=state):
+        for nat in collect(ec2(), "describe_nat_gateways", "NatGateways", Filter=state):
             findings.append(_nat_gateway(nat, region, ctx))
 
     def run_addresses() -> None:
-        for address in collect(ec2, "describe_addresses", "Addresses"):
+        for address in collect(ec2(), "describe_addresses", "Addresses"):
             findings.append(_address(address, region, ctx))
 
     def run_volumes() -> None:
-        for volume in collect(ec2, "describe_volumes", "Volumes"):
+        for volume in collect(ec2(), "describe_volumes", "Volumes"):
             if not volume.get("Attachments"):
                 findings.append(_volume(volume, region, ctx))
 
     def run_images() -> None:
-        for image in collect(ec2, "describe_images", "Images", Owners=["self"]):
+        nonlocal images_complete
+        images = collect(ec2(), "describe_images", "Images", Owners=["self"])
+        # Complete the map before building findings so one malformed image cannot truncate it.
+        for image in images:
             for mapping in image.get("BlockDeviceMappings", []):
                 snapshot_id = mapping.get("Ebs", {}).get("SnapshotId")
                 if snapshot_id:
                     ami_snapshots[snapshot_id] = image["ImageId"]
-            findings.append(_image(image, region, ctx))
+        findings.extend(_image(image, region, ctx) for image in images)
+        images_complete = True
 
     def run_snapshots() -> None:
-        for snapshot in collect(ec2, "describe_snapshots", "Snapshots", OwnerIds=["self"]):
-            findings.append(_snapshot(snapshot, ami_snapshots, region, ctx))
+        # Fail closed: without a complete AMI map no snapshot can be proven unreferenced.
+        known = ami_snapshots if images_complete else None
+        for snapshot in collect(ec2(), "describe_snapshots", "Snapshots", OwnerIds=["self"]):
+            findings.append(_snapshot(snapshot, known, region, ctx))
 
     def run_vpc_endpoints() -> None:
-        for endpoint in collect(ec2, "describe_vpc_endpoints", "VpcEndpoints"):
+        for endpoint in collect(ec2(), "describe_vpc_endpoints", "VpcEndpoints"):
             if endpoint.get("VpcEndpointType") == "Interface":
                 findings.append(_vpc_endpoint(endpoint, region, ctx))
 
     def run_public_ipv4() -> None:
         # ENIs whose public IP carries an AllocationId are Elastic IPs, already reported.
-        enis = collect(ec2, "describe_network_interfaces", "NetworkInterfaces")
+        enis = collect(ec2(), "describe_network_interfaces", "NetworkInterfaces")
         count = sum(
             1
             for eni in enis
@@ -205,18 +215,24 @@ def _image(image: dict, region: str, ctx: SweepContext) -> Finding:
 
 
 def _snapshot(
-    snapshot: dict, ami_snapshots: dict[str, str], region: str, ctx: SweepContext
+    snapshot: dict, ami_snapshots: dict[str, str] | None, region: str, ctx: SweepContext
 ) -> Finding:
-    """Self-owned snapshot; a snapshot backing an AMI is never a candidate."""
+    """Self-owned snapshot; never a candidate when it backs an AMI or AMI references are unknown.
+
+    ``ami_snapshots`` is None when ``describe_images`` did not complete.
+    """
     settings = ctx.settings
     tags = snapshot.get("Tags", [])
     size = snapshot.get("VolumeSize", 0)
     age = age_days(snapshot.get("StartTime"), ctx.now)
     detail = f"{size} GiB from {snapshot.get('VolumeId', '?')}"
-    image_id = ami_snapshots.get(snapshot["SnapshotId"])
-    ami_blocker = f"backs AMI {image_id}" if image_id else None
-    if ami_blocker:
-        detail = f"{detail}, {ami_blocker}"
+    if ami_snapshots is None:
+        ami_blocker = "AMI references unknown"
+    else:
+        image_id = ami_snapshots.get(snapshot["SnapshotId"])
+        ami_blocker = f"backs AMI {image_id}" if image_id else None
+        if ami_blocker:
+            detail = f"{detail}, {ami_blocker}"
     candidate, reason = _aged_verdict(
         tags,
         settings,
