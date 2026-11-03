@@ -3,7 +3,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from shared.marking import age_days, is_kept, is_lab, is_lab_tagged
+from shared.marking import (
+    JANITOR_PROJECT_TAG,
+    age_days,
+    is_janitor_owned,
+    is_kept,
+    is_lab,
+    is_lab_tagged,
+)
 from shared.settings import load_settings
 
 
@@ -30,3 +37,14 @@ def test_age_days():
     now = datetime(2026, 11, 10, tzinfo=UTC)
     assert age_days(datetime(2026, 11, 1, tzinfo=UTC), now) == 9
     assert age_days(None, now) is None
+
+
+def test_is_janitor_owned():
+    key, value = JANITOR_PROJECT_TAG
+    assert (key, value) == ("Project", "aws-lab-janitor")
+    assert is_janitor_owned([{"Key": "Project", "Value": "aws-lab-janitor"}])
+    assert is_janitor_owned([{"key": "Project", "value": "aws-lab-janitor"}])
+    assert not is_janitor_owned([{"Key": "Project", "Value": "other"}])
+    assert not is_janitor_owned([{"Key": "Purpose", "Value": "lab"}])
+    assert not is_janitor_owned([])
+    assert not is_janitor_owned(None)

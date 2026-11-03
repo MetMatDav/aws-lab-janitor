@@ -79,22 +79,6 @@ class AuditClient:
             }
         )
 
-    def was_proposed_live(self, resource_id: str) -> bool:
-        """True if any earlier non-dry-run plan proposed ``resource_id`` for deletion."""
-        params = {
-            "TableName": self._table,
-            "IndexName": RESOURCE_INDEX,
-            "KeyConditionExpression": "resourceId = :id",
-            "FilterExpression": "#e = :e AND dryRun = :f",
-            "ExpressionAttributeNames": {"#e": "event"},
-            "ExpressionAttributeValues": {
-                ":id": {"S": resource_id},
-                ":e": {"S": "PROPOSED"},
-                ":f": {"BOOL": False},
-            },
-        }
-        return self._any_match(params)
-
     def was_eligible_live_before(self, resource_id: str, before: datetime) -> bool:
         """True if a non-dry-run plan marked ``resource_id`` ELIGIBLE earlier than ``before``."""
         params = {

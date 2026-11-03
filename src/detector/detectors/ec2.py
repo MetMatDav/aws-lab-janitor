@@ -149,19 +149,26 @@ def _nat_gateway(nat: dict, region: str, ctx: SweepContext) -> Finding:
 
 
 def _address(address: dict, region: str, ctx: SweepContext) -> Finding:
-    """Elastic IP; an idle lab EIP becomes a candidate only once proposed in a previous live run."""
+    """Elastic IP; idle lab EIPs are eligible, and candidates once an old live run saw them idle."""
     settings = ctx.settings
     tags = address.get("Tags", [])
     allocation_id = address.get("AllocationId")
     associated = bool(address.get("AssociationId"))
-    candidate, reason = False, ""
-    if is_lab_tagged(tags, settings):
-        blocker = first_blocker(tags, settings, "associated" if associated else None)
-        if blocker is None and allocation_id and not ctx.was_proposed_live(allocation_id):
-            blocker = "not proposed in a previous live run"
-        # Legacy addresses without an AllocationId are never candidates.
-        candidate = blocker is None and allocation_id is not None
-        reason = "idle, tagged lab, proposed in a previous live run" if candidate else blocker or ""
+    lab_tagged = is_lab_tagged(tags, settings)
+    blocker = first_blocker(tags, settings, "associated" if associated else None)
+    # A legacy address without an AllocationId can be neither audited nor released.
+    eligible = lab_tagged and blocker is None and allocation_id is not None
+    candidate = eligible and ctx.was_eligible_before(allocation_id)
+    min_age = settings.min_age_days
+    if candidate:
+        reason = (
+            f"idle, tagged {settings.tag_key}={settings.tag_value}, "
+            f"first seen idle in a live run at least {min_age} days ago"
+        )
+    elif eligible:
+        reason = f"idle, not yet {min_age} days since the first live run that saw it idle"
+    else:
+        reason = (blocker or "") if lab_tagged else ""
     return _finding(
         region,
         "elastic-ip",
@@ -170,6 +177,7 @@ def _address(address: dict, region: str, ctx: SweepContext) -> Finding:
         settings,
         detail=f"{address.get('PublicIp', '?')} ({'associated' if associated else 'idle'})",
         candidate=candidate,
+        eligible=eligible,
         reason=reason,
         estimated_monthly_usd=monthly_usd("public-ipv4"),
     )

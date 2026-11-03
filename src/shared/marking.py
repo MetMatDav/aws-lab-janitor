@@ -4,6 +4,9 @@ from datetime import datetime
 
 from shared.settings import Settings
 
+# Resources the janitor's own stack creates carry this tag; the janitor never reports them.
+JANITOR_PROJECT_TAG = ("Project", "aws-lab-janitor")
+
 
 def tag_value(tags: list[dict] | None, key: str) -> str | None:
     """Return the value of tag ``key``, or None.
@@ -20,6 +23,12 @@ def tag_value(tags: list[dict] | None, key: str) -> str | None:
 def is_lab_tagged(tags: list[dict] | None, settings: Settings) -> bool:
     """True when the lab tag is present with the exact lab value."""
     return tag_value(tags, settings.tag_key) == settings.tag_value
+
+
+def is_janitor_owned(tags: list[dict] | None) -> bool:
+    """True when the resource carries the project tag of the janitor's own stack."""
+    key, value = JANITOR_PROJECT_TAG
+    return tag_value(tags, key) == value
 
 
 def is_lab(name: str | None, tags: list[dict] | None, settings: Settings) -> bool:

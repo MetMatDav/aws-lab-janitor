@@ -329,34 +329,37 @@ def _address(alloc_id, *, tags=LAB, association=None):
     return address
 
 
-def test_eip_requires_previous_live_proposal(ec2_stub, ctx_factory):
+def test_eip_age_rule(ec2_stub, ctx_factory):
     idle = {"describe_addresses": {"Addresses": [_address("eipalloc-1")]}}
     stub_ec2(ec2_stub, responses=idle)
     stub_ec2(ec2_stub, responses=idle)
     asked = []
 
-    def proposed(answer):
+    def eligible_before(answer):
         def check(resource_id):
             asked.append(resource_id)
             return answer
 
         return check
 
-    first, _ = run(ctx_factory(was_proposed_live=proposed(False)))
+    first, errors = run(ctx_factory(was_eligible_before=eligible_before(False)))
     eip = by_id(first, "elastic-ip")["eipalloc-1"]
-    assert eip.candidate is False
-    assert eip.reason == "not proposed in a previous live run"
+    assert eip.eligible is True and eip.candidate is False
+    assert eip.reason == "idle, not yet 7 days since the first live run that saw it idle"
 
-    second, _ = run(ctx_factory(was_proposed_live=proposed(True)))
+    second, more_errors = run(ctx_factory(was_eligible_before=eligible_before(True)))
     eip = by_id(second, "elastic-ip")["eipalloc-1"]
-    assert eip.candidate is True
-    assert eip.reason == "idle, tagged lab, proposed in a previous live run"
+    assert eip.candidate is True and eip.eligible is True
+    assert (
+        eip.reason == "idle, tagged Purpose=lab, first seen idle in a live run at least 7 days ago"
+    )
     assert eip.estimated_monthly_usd == 3.65
     assert asked == ["eipalloc-1", "eipalloc-1"]
+    assert errors == [] and more_errors == []
     ec2_stub.assert_no_pending_responses()
 
 
-def test_associated_eip_is_never_candidate_but_costs(ec2_stub, ctx_factory):
+def test_associated_or_kept_eip_is_not_eligible(ec2_stub, ctx_factory):
     stub_ec2(
         ec2_stub,
         responses={
@@ -369,23 +372,41 @@ def test_associated_eip_is_never_candidate_but_costs(ec2_stub, ctx_factory):
             }
         },
     )
-    findings, _ = run(ctx_factory(was_proposed_live=lambda _id: True))
+    asked = []
+
+    def eligible_before(resource_id):
+        asked.append(resource_id)
+        return True
+
+    findings, errors = run(ctx_factory(was_eligible_before=eligible_before))
     eips = by_id(findings, "elastic-ip")
     f = eips["eipalloc-2"]
-    assert f.candidate is False and f.estimated_monthly_usd == 3.65
+    assert f.eligible is False and f.candidate is False and f.estimated_monthly_usd == 3.65
     assert f.reason == "associated"
-    assert eips["eipalloc-3"].candidate is False
+    assert eips["eipalloc-3"].eligible is False and eips["eipalloc-3"].candidate is False
     assert eips["eipalloc-3"].reason == "tagged janitor=keep"
-    assert eips["eipalloc-4"].candidate is False and eips["eipalloc-4"].reason == ""
+    assert eips["eipalloc-4"].eligible is False and eips["eipalloc-4"].candidate is False
+    assert eips["eipalloc-4"].reason == ""
+    # A blocked address never reaches the audit lookup.
+    assert asked == []
+    assert errors == []
     ec2_stub.assert_no_pending_responses()
 
 
-def test_legacy_address_without_allocation_id_is_keyed_by_ip(ec2_stub, ctx_factory):
+def test_legacy_address_without_allocation_id_is_not_eligible(ec2_stub, ctx_factory):
     legacy = {"PublicIp": "198.51.100.7", "Domain": "standard", "Tags": LAB}
     stub_ec2(ec2_stub, responses={"describe_addresses": {"Addresses": [legacy]}})
-    findings, _ = run(ctx_factory(was_proposed_live=lambda _id: True))
+    asked = []
+
+    def eligible_before(resource_id):
+        asked.append(resource_id)
+        return True
+
+    findings, errors = run(ctx_factory(was_eligible_before=eligible_before))
     f = by_id(findings, "elastic-ip")["198.51.100.7"]
-    assert f.candidate is False and f.estimated_monthly_usd == 3.65
+    assert f.eligible is False and f.candidate is False and f.estimated_monthly_usd == 3.65
+    assert asked == []
+    assert errors == []
     ec2_stub.assert_no_pending_responses()
 
 

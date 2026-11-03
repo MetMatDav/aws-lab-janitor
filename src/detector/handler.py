@@ -2,7 +2,8 @@
 
 The detector only observes. It never deletes anything; it writes the plan and
 its report to the versioned plans bucket, one ``DETECTED`` audit event per
-finding, one ``PROPOSED`` event per candidate and a run summary, and returns a
+finding, one ``PROPOSED`` event per candidate, one ``ELIGIBLE`` event per eligible
+finding (the record the next run's age rule reads) and a run summary, and returns a
 compact result for Step Functions.
 
 Run locally with ``PYTHONPATH=src python -m detector.handler`` to print a
@@ -15,7 +16,7 @@ import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from detector.detectors.databases import detect_elasticache, detect_rds
 from detector.detectors.ec2 import detect_ec2
@@ -26,6 +27,7 @@ from detector.sweep import TIME_BUDGET_MESSAGE, SweepContext, safe
 from shared.audit import AuditClient
 from shared.aws_clients import ClientFactory
 from shared.findings import ErrorFinding, Finding
+from shared.marking import is_janitor_owned
 from shared.plan import build_plan, new_run_id, plan_bytes
 from shared.plan_store import PlanStore
 from shared.report import render_report
@@ -125,12 +127,14 @@ def sweep(regions: list[str], ctx: SweepContext) -> Sweep:
 def start_run(
     settings: Settings,
     clients: ClientFactory,
-    was_proposed_live: Callable[[str], bool],
+    was_eligible_live_before: Callable[[str, datetime], bool],
     context,
 ) -> tuple[str, SweepContext]:
     """Open a run: its id, its run-scoped logger and the context every detector receives."""
     now = datetime.now(UTC)
     run_id = new_run_id(now)
+    # An EIP counts only if a live run saw it idle before this instant.
+    cutoff = now - timedelta(days=settings.min_age_days)
     log = logging.LoggerAdapter(logging.getLogger("detector"), {"runId": run_id})
     account = clients.get("sts", settings.region).get_caller_identity()["Account"]
     ctx = SweepContext(
@@ -138,7 +142,7 @@ def start_run(
         clients=clients,
         now=now,
         account=account,
-        was_proposed_live=was_proposed_live,
+        was_eligible_before=lambda resource_id: was_eligible_live_before(resource_id, cutoff),
         deadline=deadline_for(context),
         log=log,
     )
@@ -150,6 +154,11 @@ def detect_plan(run_id: str, ctx: SweepContext) -> dict:
     """Sweep every enabled region plus the global services and build the plan document."""
     regions = ctx.clients.enabled_regions()
     findings, errors = sweep(regions, ctx)
+    # The janitor's own stack resources must never appear in its plan.
+    owned = sum(1 for f in findings if is_janitor_owned(f.tags))
+    if owned:
+        findings = [f for f in findings if not is_janitor_owned(f.tags)]
+        ctx.log.info("ignoring %d resources owned by the janitor", owned)
     ctx.log.info(
         "sweep finished: %d regions, %d findings, %d errors",
         len(regions),
@@ -163,7 +172,7 @@ def handler(event: dict, context) -> dict:
     """Lambda entry point: detect, store the plan and report, audit, return a compact result."""
     settings = load_settings(event, os.environ)
     clients, store, audit = build_dependencies(settings)
-    run_id, ctx = start_run(settings, clients, audit.was_proposed_live, context)
+    run_id, ctx = start_run(settings, clients, audit.was_eligible_live_before, context)
     plan = detect_plan(run_id, ctx)
 
     stored = store.put(run_id, plan, render_report(plan, settings.plans_bucket))
@@ -176,7 +185,12 @@ def handler(event: dict, context) -> dict:
 
     candidates = plan["candidates"]
     detected = [*candidates, *plan["inventory"]]
-    for event_name, items in (("DETECTED", detected), ("PROPOSED", candidates)):
+    eligible = [item for item in detected if item["eligible"]]
+    for event_name, items in (
+        ("DETECTED", detected),
+        ("PROPOSED", candidates),
+        ("ELIGIBLE", eligible),
+    ):
         for item in items:
             audit.put_run_event(
                 run_id=run_id,
@@ -215,12 +229,12 @@ def handler(event: dict, context) -> dict:
 def main() -> None:
     """Print a dry-run plan for the current credentials; no upload and no audit writes.
 
-    No audit table is read either, so no resource counts as previously proposed live.
+    No audit table is read either, so no resource counts as previously eligible.
     """
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     settings = load_settings({"config": {"dryRun": True}}, os.environ)
     clients = ClientFactory()
-    run_id, ctx = start_run(settings, clients, lambda _resource_id: False, None)
+    run_id, ctx = start_run(settings, clients, lambda _resource_id, _before: False, None)
     print(plan_bytes(detect_plan(run_id, ctx)).decode())
 
 

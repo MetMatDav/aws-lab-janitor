@@ -36,7 +36,7 @@ class SweepContext:
     clients: ClientFactory
     now: datetime
     account: str
-    was_proposed_live: Callable[[str], bool]
+    was_eligible_before: Callable[[str], bool]
     deadline: float
     log: logging.LoggerAdapter
 

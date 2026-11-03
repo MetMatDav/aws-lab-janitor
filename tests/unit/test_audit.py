@@ -64,24 +64,6 @@ def put_params(item: dict) -> dict:
     return {"TableName": TABLE, "Item": item, "ConditionExpression": CONDITION}
 
 
-def query_params(resource_id: str, start_key: dict | None = None) -> dict:
-    params = {
-        "TableName": TABLE,
-        "IndexName": "by-resource",
-        "KeyConditionExpression": "resourceId = :id",
-        "FilterExpression": "#e = :e AND dryRun = :f",
-        "ExpressionAttributeNames": {"#e": "event"},
-        "ExpressionAttributeValues": {
-            ":id": {"S": resource_id},
-            ":e": {"S": "PROPOSED"},
-            ":f": {"BOOL": False},
-        },
-    }
-    if start_key is not None:
-        params["ExclusiveStartKey"] = start_key
-    return params
-
-
 def test_put_run_event_is_conditional(ddb_stub):
     ddb_stub.add_response("put_item", {}, put_params(event_item({"kind": {"S": "ec2:instance"}})))
 
@@ -207,64 +189,6 @@ def test_put_run_summary_swallows_conditional_failure(ddb_stub):
 
     audit(ddb_stub).put_run_summary(RUN_ID, {}, AT)
 
-    ddb_stub.assert_no_pending_responses()
-
-
-def test_was_proposed_live_filters_dry_run(ddb_stub):
-    ddb_stub.add_response(
-        "query",
-        {"Items": [{"resourceId": {"S": "i-0abc"}}], "Count": 1, "ScannedCount": 2},
-        query_params("i-0abc"),
-    )
-
-    assert audit(ddb_stub).was_proposed_live("i-0abc") is True
-    ddb_stub.assert_no_pending_responses()
-
-
-def test_was_proposed_live_is_false_when_nothing_matches(ddb_stub):
-    ddb_stub.add_response(
-        "query", {"Items": [], "Count": 0, "ScannedCount": 3}, query_params("i-0abc")
-    )
-
-    assert audit(ddb_stub).was_proposed_live("i-0abc") is False
-    ddb_stub.assert_no_pending_responses()
-
-
-def test_was_proposed_live_pages_until_a_match(ddb_stub):
-    page_one_end = {"pk": {"S": "RUN#a"}, "sk": {"S": "x"}, "resourceId": {"S": "i-0abc"}}
-    page_two_end = {"pk": {"S": "RUN#b"}, "sk": {"S": "y"}, "resourceId": {"S": "i-0abc"}}
-    ddb_stub.add_response(
-        "query",
-        {"Items": [], "Count": 0, "ScannedCount": 5, "LastEvaluatedKey": page_one_end},
-        query_params("i-0abc"),
-    )
-    ddb_stub.add_response(
-        "query",
-        {
-            "Items": [{"resourceId": {"S": "i-0abc"}}],
-            "Count": 1,
-            "ScannedCount": 1,
-            "LastEvaluatedKey": page_two_end,
-        },
-        query_params("i-0abc", page_one_end),
-    )
-
-    assert audit(ddb_stub).was_proposed_live("i-0abc") is True
-    ddb_stub.assert_no_pending_responses()
-
-
-def test_was_proposed_live_is_false_when_all_pages_are_exhausted(ddb_stub):
-    end = {"pk": {"S": "RUN#a"}, "sk": {"S": "x"}, "resourceId": {"S": "i-0abc"}}
-    ddb_stub.add_response(
-        "query",
-        {"Items": [], "Count": 0, "ScannedCount": 5, "LastEvaluatedKey": end},
-        query_params("i-0abc"),
-    )
-    ddb_stub.add_response(
-        "query", {"Items": [], "Count": 0, "ScannedCount": 2}, query_params("i-0abc", end)
-    )
-
-    assert audit(ddb_stub).was_proposed_live("i-0abc") is False
     ddb_stub.assert_no_pending_responses()
 
 

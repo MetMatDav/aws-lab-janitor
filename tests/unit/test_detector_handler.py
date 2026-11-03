@@ -1,7 +1,7 @@
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -85,6 +85,7 @@ class FakeAudit:
     def __init__(self) -> None:
         self.events: list[dict] = []
         self.summaries: list[tuple[str, dict, datetime]] = []
+        self.eligibility_lookups: list[tuple[str, datetime]] = []
 
     def put_run_event(  # noqa: PLR0913, PLR0917
         self, run_id, region, resource_id, kind, event, actor, dry_run, detail, at
@@ -103,7 +104,8 @@ class FakeAudit:
             }
         )
 
-    def was_proposed_live(self, resource_id: str) -> bool:
+    def was_eligible_live_before(self, resource_id: str, before: datetime) -> bool:
+        self.eligibility_lookups.append((resource_id, before))
         return False
 
     def put_run_summary(self, run_id: str, summary: dict, at: datetime) -> None:
@@ -314,7 +316,7 @@ def test_context_carries_account_audit_lookup_and_deadline(harness):
     ctx = harness.contexts[0]
     assert all(c is ctx for c in harness.contexts)
     assert ctx.account == ACCOUNT
-    assert ctx.was_proposed_live == harness.audit.was_proposed_live
+    assert ctx.was_eligible_before("eipalloc-1") is False
     assert before + 600 - 120 <= ctx.deadline <= after + 600 - 120
     assert ctx.settings is harness.settings
     assert isinstance(ctx.log, logging.LoggerAdapter)
@@ -391,3 +393,84 @@ def test_global_guard_skips_detect_global(monkeypatch, ctx_past_deadline):
     assert errors == [
         ErrorFinding("global", "sweep", "skipped: time budget exhausted", "time-budget")
     ]
+
+
+def test_handler_writes_eligible_events_for_eligible_findings(harness):
+    harness.regional_findings = {
+        "us-east-1": [
+            finding("eipalloc-1", kind="elastic-ip", eligible=True, candidate=True, reason="old"),
+            finding("eipalloc-2", kind="elastic-ip", eligible=True, reason="not yet"),
+            finding("eipalloc-3", kind="elastic-ip", reason="associated"),
+        ],
+    }
+
+    result = handler_module.handler({"config": {"dryRun": False}}, None)
+
+    events = harness.audit.events
+    assert [(e["resource_id"], e["event"]) for e in events] == [
+        ("eipalloc-1", "DETECTED"),
+        ("eipalloc-2", "DETECTED"),
+        ("eipalloc-3", "DETECTED"),
+        ("eipalloc-1", "PROPOSED"),
+        ("eipalloc-1", "ELIGIBLE"),
+        ("eipalloc-2", "ELIGIBLE"),
+    ]
+    eligible = [e for e in events if e["event"] == "ELIGIBLE"]
+    assert all(e["dry_run"] is False and e["actor"] == "lambda:detector" for e in eligible)
+    assert eligible[1]["detail"] == {
+        "kind": "elastic-ip",
+        "reason": "not yet",
+        "estimatedMonthlyUsd": 10.0,
+        "planSha256": result["planSha256"],
+    }
+    assert result["findingCount"] == 3
+
+
+def test_eligible_events_follow_the_dry_run_setting(harness):
+    harness.regional_findings = {
+        "us-east-1": [finding("eipalloc-1", kind="elastic-ip", eligible=True)]
+    }
+
+    handler_module.handler({"config": {"dryRun": True}}, None)
+
+    eligible = [e for e in harness.audit.events if e["event"] == "ELIGIBLE"]
+    assert [e["dry_run"] for e in eligible] == [True]
+
+
+def test_handler_binds_eligible_lookup_with_min_age(harness):
+    handler_module.handler({"config": {"dryRun": True, "minAgeDays": 7}}, None)
+
+    ctx = harness.contexts[0]
+    assert ctx.was_eligible_before("eipalloc-1") is False
+    assert harness.audit.eligibility_lookups == [("eipalloc-1", ctx.now - timedelta(days=7))]
+
+
+def test_main_never_consults_the_audit_table(harness, monkeypatch, capsys):
+    monkeypatch.setattr(handler_module, "ClientFactory", lambda: harness.factory)
+
+    handler_module.main()
+
+    ctx = harness.contexts[0]
+    assert ctx.was_eligible_before("eipalloc-1") is False
+    assert harness.audit.eligibility_lookups == []
+    assert harness.audit.events == []
+    assert '"candidates"' in capsys.readouterr().out
+
+
+def test_detect_plan_drops_janitor_owned_findings(harness):
+    owned = [{"Key": "Project", "Value": "aws-lab-janitor"}]
+    harness.regional_findings = {
+        "us-east-1": [
+            finding("nat-own", candidate=True, tags=owned),
+            finding("vol-own", kind="ebs-volume", tags=owned),
+            finding("nat-1", candidate=True),
+        ],
+    }
+
+    result = handler_module.handler({"config": {"dryRun": True}}, None)
+
+    plan = harness.plan
+    assert [c["resourceId"] for c in plan["candidates"]] == ["nat-1"]
+    assert plan["inventory"] == []
+    assert result["findingCount"] == 1
+    assert {e["resource_id"] for e in harness.audit.events} == {"nat-1"}

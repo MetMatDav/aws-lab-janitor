@@ -17,6 +17,7 @@ def make_finding(region: str, kind: str, resource_id: str, lab: bool, **fields) 
         "arn": None,
         "tags": [],
         "candidate": False,
+        "eligible": False,
         "reason": "",
         "age_days": None,
         "estimated_monthly_usd": None,

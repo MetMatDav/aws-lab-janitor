@@ -158,3 +158,15 @@ def test_arn_breaks_ties_between_same_region_kind_and_id():
     backward = make_plan([first, second], [])
     assert [c["arn"] for c in forward["candidates"]] == [first.arn, second.arn]
     assert plan_bytes(forward) == plan_bytes(backward)
+
+
+def test_candidate_dict_carries_eligible():
+    plan = make_plan(
+        [finding("eip-1", kind="elastic-ip", eligible=True), finding("nat-1", candidate=False)], []
+    )
+
+    eip = next(c for c in plan["candidates"] if c["resourceId"] == "eip-1")
+    assert eip["eligible"] is True
+    assert list(eip)[list(eip).index("candidate") + 1] == "eligible"
+    assert finding("nat-1").to_dict()["eligible"] is False
+    assert plan["inventory"][0]["eligible"] is False

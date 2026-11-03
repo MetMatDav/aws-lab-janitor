@@ -38,6 +38,8 @@ class Finding:
     reason: str
     age_days: int | None
     estimated_monthly_usd: float | None
+    # Passes every rule except the audit-history one; the next run's age check reads it.
+    eligible: bool = False
     tags: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -50,6 +52,7 @@ class Finding:
             "detail": self.detail,
             "lab": self.lab,
             "candidate": self.candidate,
+            "eligible": self.eligible,
             "reason": self.reason,
             "ageDays": self.age_days,
             "estimatedMonthlyUsd": self.estimated_monthly_usd,

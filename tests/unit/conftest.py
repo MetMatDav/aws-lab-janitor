@@ -90,7 +90,7 @@ def ctx_factory(fake_clients) -> Callable[..., SweepContext]:
             "clients": fake_clients,
             "now": NOW,
             "account": "123456789012",
-            "was_proposed_live": lambda _resource_id: False,
+            "was_eligible_before": lambda _resource_id: False,
             "deadline": time.time() + 600,
             "log": logging.LoggerAdapter(logging.getLogger("test"), {"runId": "test"}),
         }
