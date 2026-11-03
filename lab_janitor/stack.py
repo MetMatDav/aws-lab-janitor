@@ -7,9 +7,11 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
+from lab_janitor.approval_api import ApprovalApi
 from lab_janitor.audit import AuditStore
 from lab_janitor.config import JanitorConfig
 from lab_janitor.detector import Detector
+from lab_janitor.executor import Executor
 from lab_janitor.nag import acknowledge
 from lab_janitor.notifications import Notifications
 from lab_janitor.notifier import Notifier
@@ -24,7 +26,9 @@ class LabJanitorStack(Stack):
 
     Composes the shared dead-letter queue, the notification topics, the audit
     store, the detector that writes the weekly plan, the notifier that emails
-    the report, and the scheduled workflow that ties them together.
+    the report and the approval request, the approval endpoint, the executor
+    that applies an approved plan, and the scheduled workflow that ties them
+    together.
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs: Any) -> None:
@@ -67,6 +71,11 @@ class LabJanitorStack(Stack):
             notifications=self.notifications,
             code=code,
         )
+        self.approval_api = ApprovalApi(
+            self, "ApprovalApi", config=self.config, audit=self.audit, code=code
+        )
+        self.notifier.function.add_environment("APPROVAL_URL", self.approval_api.url)
+        self.executor = Executor(self, "Executor", config=self.config, audit=self.audit, code=code)
         notifier_role = self.notifier.function.role
         if notifier_role is None:  # Function always creates a role when none is passed in.
             raise RuntimeError("notifier function has no execution role")

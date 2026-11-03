@@ -1,12 +1,9 @@
 import json
 
-import aws_cdk as cdk
 import pytest
 from aws_cdk import assertions
 from aws_cdk.assertions import Match
 
-from lab_janitor.stack import LabJanitorStack
-from tests.infra.conftest import ENV
 from tests.infra.helpers import (
     DETECTOR_HANDLER,
     NOTIFIER_HANDLER,
@@ -50,15 +47,6 @@ LOG_DELIVERY_ACTIONS = {
     "logs:DescribeResourcePolicies",
     "logs:DescribeLogGroups",
 }
-
-
-@pytest.fixture(scope="module")
-def live_template() -> assertions.Template:
-    """Template of a stack configured to delete for real and with the schedule off."""
-    app = cdk.App(
-        context={"reportEmail": "test@example.com", "janitorEnabled": "false", "dryRun": "false"}
-    )
-    return assertions.Template.from_stack(LabJanitorStack(app, "LabJanitorStack", env=ENV))
 
 
 def _topic_id(template: assertions.Template, display_name: str) -> str:

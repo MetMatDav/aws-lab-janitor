@@ -25,6 +25,349 @@
     }
   },
   "Resources": {
+    "ApprovalApi8A7EAF8B": {
+      "Properties": {
+        "Description": "Lab janitor approval endpoint",
+        "Name": "Api",
+        "ProtocolType": "HTTP",
+        "Tags": {
+          "ManagedBy": "cdk",
+          "Project": "aws-lab-janitor"
+        }
+      },
+      "Type": "AWS::ApiGatewayV2::Api"
+    },
+    "ApprovalApiAccessLogsFC6E5584": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "RetentionInDays": 90,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "ApprovalApiFunction87C1E074": {
+      "DependsOn": [
+        "ApprovalApiFunctionServiceRoleDefaultPolicy44E10A10",
+        "ApprovalApiFunctionServiceRole5FBB7AC8"
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64"
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "ASSET.zip"
+        },
+        "Description": "Lab janitor approval handler: records decisions and resumes the run",
+        "Environment": {
+          "Variables": {
+            "APPROVAL_AUTH": "link",
+            "APPROVER_ROLE_ARN": "",
+            "AUDIT_TABLE": {
+              "Ref": "AuditTable18A3095C"
+            }
+          }
+        },
+        "Handler": "approval.handler.handler",
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "ApprovalApiLogsDC91504E"
+          }
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "ApprovalApiFunctionServiceRole5FBB7AC8",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.13",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "Timeout": 10
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "ApprovalApiFunctionServiceRole5FBB7AC8": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "ApprovalApiFunctionServiceRoleDefaultPolicy44E10A10": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "dynamodb:GetItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "APPROVAL#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "dynamodb:UpdateItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "APPROVAL#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": [
+                "states:SendTaskSuccess",
+                "states:SendTaskFailure"
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "TaskCallbacks"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "ApprovalApiFunctionServiceRoleDefaultPolicy44E10A10",
+        "Roles": [
+          {
+            "Ref": "ApprovalApiFunctionServiceRole5FBB7AC8"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    },
+    "ApprovalApiGETapprovalsidF56D3596": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "ApprovalApi8A7EAF8B"
+        },
+        "AuthorizationType": "NONE",
+        "RouteKey": "GET /approvals/{id}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "ApprovalApiGETapprovalsidHandler14473FD1"
+              }
+            ]
+          ]
+        }
+      },
+      "Type": "AWS::ApiGatewayV2::Route"
+    },
+    "ApprovalApiGETapprovalsidHandler14473FD1": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "ApprovalApi8A7EAF8B"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "ApprovalApiFunction87C1E074",
+            "Arn"
+          ]
+        },
+        "PayloadFormatVersion": "2.0"
+      },
+      "Type": "AWS::ApiGatewayV2::Integration"
+    },
+    "ApprovalApiGETapprovalsidHandlerPermission7AD59F06": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "ApprovalApiFunction87C1E074",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:us-east-1:123456789012:",
+              {
+                "Ref": "ApprovalApi8A7EAF8B"
+              },
+              "/*/*/approvals/{id}"
+            ]
+          ]
+        }
+      },
+      "Type": "AWS::Lambda::Permission"
+    },
+    "ApprovalApiLogsDC91504E": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "RetentionInDays": 90,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "ApprovalApiPOSTapprovalsid4E12813A": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "ApprovalApi8A7EAF8B"
+        },
+        "AuthorizationType": "NONE",
+        "RouteKey": "POST /approvals/{id}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "ApprovalApiGETapprovalsidHandler14473FD1"
+              }
+            ]
+          ]
+        }
+      },
+      "Type": "AWS::ApiGatewayV2::Route"
+    },
+    "ApprovalApiPOSTapprovalsidHandlerPermissionA2B616E6": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "ApprovalApiFunction87C1E074",
+            "Arn"
+          ]
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:us-east-1:123456789012:",
+              {
+                "Ref": "ApprovalApi8A7EAF8B"
+              },
+              "/*/*/approvals/{id}"
+            ]
+          ]
+        }
+      },
+      "Type": "AWS::Lambda::Permission"
+    },
+    "ApprovalApiStageDFA28CB3": {
+      "Properties": {
+        "AccessLogSettings": {
+          "DestinationArn": {
+            "Fn::GetAtt": [
+              "ApprovalApiAccessLogsFC6E5584",
+              "Arn"
+            ]
+          },
+          "Format": "{\"requestId\":\"$context.requestId\",\"requestTime\":\"$context.requestTime\",\"routeKey\":\"$context.routeKey\",\"status\":\"$context.status\",\"ip\":\"$context.identity.sourceIp\",\"error\":\"$context.error.message\"}"
+        },
+        "ApiId": {
+          "Ref": "ApprovalApi8A7EAF8B"
+        },
+        "AutoDeploy": true,
+        "DefaultRouteSettings": {
+          "ThrottlingBurstLimit": 20,
+          "ThrottlingRateLimit": 10
+        },
+        "StageName": "$default",
+        "Tags": {
+          "ManagedBy": "cdk",
+          "Project": "aws-lab-janitor"
+        }
+      },
+      "Type": "AWS::ApiGatewayV2::Stage"
+    },
     "AuditPlansBucketDEC41664": {
       "DeletionPolicy": "Retain",
       "Properties": {
@@ -604,6 +947,348 @@
       },
       "Type": "AWS::SQS::QueuePolicy"
     },
+    "ExecutorFunction90B119DB": {
+      "DependsOn": [
+        "ExecutorFunctionServiceRoleDefaultPolicy22F768B2",
+        "ExecutorFunctionServiceRole439AD252"
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64"
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "ASSET.zip"
+        },
+        "Description": "Lab janitor executor: deletes the approved, re-verified plan items",
+        "Environment": {
+          "Variables": {
+            "AUDIT_TABLE": {
+              "Ref": "AuditTable18A3095C"
+            },
+            "DELETIONS_ENABLED": "false",
+            "EVENT_BUS_NAME": "default",
+            "KEEP_TAG_KEY": "janitor",
+            "KEEP_TAG_VALUE": "keep",
+            "LAB_NAME_PREFIX": "LAB-",
+            "LAB_TAG_KEY": "Purpose",
+            "LAB_TAG_VALUE": "lab",
+            "MIN_AGE_DAYS": "7",
+            "PLANS_BUCKET": {
+              "Ref": "AuditPlansBucketDEC41664"
+            }
+          }
+        },
+        "Handler": "executor.handler.handler",
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "ExecutorLogs9BC6F088"
+          }
+        },
+        "MemorySize": 512,
+        "ReservedConcurrentExecutions": 1,
+        "Role": {
+          "Fn::GetAtt": [
+            "ExecutorFunctionServiceRole439AD252",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.13",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "Timeout": 600
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "ExecutorFunctionServiceRole439AD252": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "ExecutorFunctionServiceRoleDefaultPolicy22F768B2": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ec2:DeleteSnapshot",
+                "ec2:DeleteVolume",
+                "ec2:ReleaseAddress"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/Purpose": "lab"
+                }
+              },
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":ec2:*::snapshot/*"
+                    ]
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":ec2:*:123456789012:volume/*"
+                    ]
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":ec2:*:123456789012:elastic-ip/*"
+                    ]
+                  ]
+                }
+              ],
+              "Sid": "ExecutorDeleteLabEc2"
+            },
+            {
+              "Action": [
+                "cloudwatch:DeleteDashboards",
+                "internetmonitor:GetMonitor",
+                "internetmonitor:UpdateMonitor",
+                "internetmonitor:DeleteMonitor"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":cloudwatch::123456789012:dashboard/LAB-*"
+                    ]
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "arn:",
+                      {
+                        "Ref": "AWS::Partition"
+                      },
+                      ":internetmonitor:*:123456789012:monitor/LAB-*"
+                    ]
+                  ]
+                }
+              ],
+              "Sid": "ExecutorDeleteLabNamed"
+            },
+            {
+              "Action": [
+                "ec2:DeleteSnapshot",
+                "ec2:DeleteVolume",
+                "ec2:ReleaseAddress",
+                "cloudwatch:DeleteDashboards",
+                "internetmonitor:UpdateMonitor",
+                "internetmonitor:DeleteMonitor"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:ResourceTag/janitor": "keep"
+                }
+              },
+              "Effect": "Deny",
+              "Resource": "*",
+              "Sid": "ExecutorDenyKept"
+            },
+            {
+              "Action": [
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeImages"
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "ExecutorReverify"
+            },
+            {
+              "Action": "cloudwatch:ListTagsForResource",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":cloudwatch::123456789012:dashboard/LAB-*"
+                  ]
+                ]
+              },
+              "Sid": "ExecutorReverifyDashboardTags"
+            },
+            {
+              "Action": "events:PutEvents",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":events:us-east-1:123456789012:event-bus/default"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AuditPlansBucketDEC41664",
+                        "Arn"
+                      ]
+                    },
+                    "/plans/*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "dynamodb:PutItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "RUN#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "dynamodb:GetItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "APPROVAL#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "ExecutorFunctionServiceRoleDefaultPolicy22F768B2",
+        "Roles": [
+          {
+            "Ref": "ExecutorFunctionServiceRole439AD252"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    },
+    "ExecutorLogs9BC6F088": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "RetentionInDays": 90,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete"
+    },
     "NotificationsAlertsEmail5C12F92E": {
       "Properties": {
         "Endpoint": "test@example.com",
@@ -897,6 +1582,12 @@
               "Ref": "NotificationsApprovalsTopic7B662042"
             },
             "APPROVAL_AUTH": "link",
+            "APPROVAL_URL": {
+              "Fn::GetAtt": [
+                "ApprovalApi8A7EAF8B",
+                "ApiEndpoint"
+              ]
+            },
             "AUDIT_TABLE": {
               "Ref": "AuditTable18A3095C"
             },

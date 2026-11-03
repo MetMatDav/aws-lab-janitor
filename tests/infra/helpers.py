@@ -6,6 +6,8 @@ from aws_cdk import assertions
 
 DETECTOR_HANDLER = "detector.handler.handler"
 NOTIFIER_HANDLER = "notifier.handler.handler"
+APPROVAL_HANDLER = "approval.handler.handler"
+EXECUTOR_HANDLER = "executor.handler.handler"
 
 
 def _references(value: object, logical_id: str) -> bool:
@@ -54,6 +56,24 @@ def resources(statement: dict) -> list:
     return list(value) if isinstance(value, list) else [value]
 
 
+def render(value: object) -> str:
+    """A resource value as text: ``Fn::Join`` parts joined, any ``Ref`` shown as ``<name>``.
+
+    ``{"Fn::Join": ["", ["arn:", {"Ref": "AWS::Partition"}, ":ec2:*::snapshot/*"]]}``
+    renders as ``arn:<AWS::Partition>:ec2:*::snapshot/*``.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict) and "Ref" in value:
+        return f"<{value['Ref']}>"
+    if isinstance(value, dict) and "Fn::GetAtt" in value:
+        return "<{}>".format(".".join(value["Fn::GetAtt"]))
+    if isinstance(value, dict) and "Fn::Join" in value:
+        separator, parts = value["Fn::Join"]
+        return separator.join(render(part) for part in parts)
+    raise ValueError(f"cannot render {value!r}")
+
+
 def function_role_id(template: assertions.Template, handler: str) -> str:
     """Logical id of the execution role of the function whose handler is ``handler``."""
     functions = template.find_resources(
@@ -89,6 +109,16 @@ def statements_of_role(template: assertions.Template, role_id: str) -> list[dict
 def detector_statements(template: assertions.Template) -> list[dict]:
     """Statements granted to the detector function's execution role."""
     return role_statements(template, DETECTOR_HANDLER)
+
+
+def executor_statements(template: assertions.Template) -> list[dict]:
+    """Statements granted to the executor function's execution role."""
+    return role_statements(template, EXECUTOR_HANDLER)
+
+
+def approval_statements(template: assertions.Template) -> list[dict]:
+    """Statements granted to the approval handler function's execution role."""
+    return role_statements(template, APPROVAL_HANDLER)
 
 
 def state_machine_id(template: assertions.Template) -> str:

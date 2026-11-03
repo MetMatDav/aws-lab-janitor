@@ -1,12 +1,28 @@
+import pytest
 from aws_cdk import assertions
 
+from lab_janitor.markers import (
+    KEEP_TAG_KEY,
+    KEEP_TAG_VALUE,
+    LAB_NAME_PREFIX,
+    LAB_TAG_KEY,
+    LAB_TAG_VALUE,
+)
 from tests.infra.helpers import (
+    APPROVAL_HANDLER,
     DETECTOR_HANDLER,
+    EXECUTOR_HANDLER,
+    NOTIFIER_HANDLER,
     actions,
     detector_statements,
+    executor_statements,
     function_role_id,
     iam_statements,
+    render,
     resources,
+    role_statements,
+    state_machine_role_id,
+    statements_of_role,
 )
 
 MUTATING_PREFIXES = (
@@ -49,6 +65,43 @@ DETECTOR_READ_ACTIONS = {
     "s3:GetBucketTagging",
     "cloudfront:ListDistributions",
     "sts:GetCallerIdentity",
+}
+
+# Only these remove or alter resources; the guardrails below hunt for them.
+DELETE_PREFIXES = ("Delete", "Release", "Terminate")
+
+EXECUTOR_MUTATING_ACTIONS = {
+    "ec2:DeleteSnapshot",
+    "ec2:DeleteVolume",
+    "ec2:ReleaseAddress",
+    "cloudwatch:DeleteDashboards",
+    "internetmonitor:UpdateMonitor",
+    "internetmonitor:DeleteMonitor",
+}
+# The executor's own audit trail: RUN# items (LeadingKeys) and run events on
+# the default bus. They write evidence, not lab resources.
+EXECUTOR_AUDIT_WRITES = {"dynamodb:PutItem", "events:PutEvents"}
+EXECUTOR_ACTIONS = (
+    EXECUTOR_MUTATING_ACTIONS
+    | EXECUTOR_AUDIT_WRITES
+    | {
+        "internetmonitor:GetMonitor",
+        "ec2:DescribeSnapshots",
+        "ec2:DescribeVolumes",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeImages",
+        "cloudwatch:ListTagsForResource",
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "dynamodb:GetItem",
+    }
+)
+NOTIFIER_ACTIONS = {
+    "s3:GetObject",
+    "s3:GetObjectVersion",
+    "dynamodb:PutItem",
+    "dynamodb:UpdateItem",
+    "sns:Publish",
 }
 
 TABLE_ARN = {"Fn::GetAtt": ["AuditTable18A3095C", "Arn"]}
@@ -152,3 +205,132 @@ def test_no_statement_in_the_stack_allows_iam_or_wildcard_actions(template: asse
             assert a != "*", st
             assert not a.startswith("iam:"), st
             assert not a.endswith(":*"), st
+
+
+# --- template-wide delete guardrails (Plan 2) -----------------------------------------------
+
+
+@pytest.fixture(params=["template", "live_template"])
+def any_template(request: pytest.FixtureRequest) -> assertions.Template:
+    """The dry-run template and the live (deleting) template; both must hold the guardrails."""
+    return request.getfixturevalue(request.param)
+
+
+def _statements_by_role(template: assertions.Template) -> dict[str, list[dict]]:
+    return {
+        role_id: statements_of_role(template, role_id)
+        for role_id in template.find_resources("AWS::IAM::Role")
+    }
+
+
+def _is_delete(action: str) -> bool:
+    return action.split(":")[1].startswith(DELETE_PREFIXES)
+
+
+def test_every_policy_is_attached_to_a_role_only(any_template: assertions.Template):
+    # So the per-role checks below see every statement in the template.
+    for policy in any_template.find_resources("AWS::IAM::Policy").values():
+        properties = policy["Properties"]
+        assert properties.get("Roles")
+        assert "Users" not in properties
+        assert "Groups" not in properties
+
+
+def test_delete_allows_belong_to_the_executor_or_are_log_delivery(
+    any_template: assertions.Template,
+):
+    executor_role = function_role_id(any_template, EXECUTOR_HANDLER)
+    machine_role = state_machine_role_id(any_template)
+    executor_deletes = set()
+    for role_id, statements in _statements_by_role(any_template).items():
+        for st in statements:
+            if st["Effect"] != "Allow":
+                continue
+            deletes = {a for a in actions(st) if _is_delete(a)}
+            if not deletes:
+                continue
+            if role_id == executor_role:
+                executor_deletes |= deletes
+                continue
+            assert role_id == machine_role, (role_id, deletes)
+            assert deletes == {"logs:DeleteLogDelivery"}, deletes
+    assert executor_deletes == {a for a in EXECUTOR_MUTATING_ACTIONS if _is_delete(a)}
+
+
+def test_executor_mutating_allows_are_locked_to_lab_resources(any_template: assertions.Template):
+    locked = 0
+    for st in executor_statements(any_template):
+        if st["Effect"] != "Allow":
+            continue
+        mutating = [
+            a
+            for a in actions(st)
+            if a.split(":")[1].startswith(MUTATING_PREFIXES) and a not in EXECUTOR_AUDIT_WRITES
+        ]
+        if not mutating:
+            continue
+        assert set(mutating) <= EXECUTOR_MUTATING_ACTIONS, mutating
+        assert "*" not in resources(st), st
+        lab_arns = all(render(r).endswith(f"/{LAB_NAME_PREFIX}*") for r in resources(st))
+        lab_tag = (
+            st.get("Condition", {}).get("StringEquals", {}).get(f"aws:ResourceTag/{LAB_TAG_KEY}")
+            == LAB_TAG_VALUE
+        )
+        assert lab_arns or lab_tag, st
+        locked += 1
+    assert locked == 2
+
+
+def test_executor_audit_writes_are_scoped(any_template: assertions.Template):
+    for st in executor_statements(any_template):
+        if st["Effect"] == "Allow" and set(actions(st)) & EXECUTOR_AUDIT_WRITES:
+            assert "*" not in resources(st), st
+
+
+def test_executor_denies_mutations_on_kept_resources(any_template: assertions.Template):
+    denies = [st for st in executor_statements(any_template) if st["Effect"] == "Deny"]
+    assert len(denies) == 1
+    (deny,) = denies
+    assert deny["Sid"] == "ExecutorDenyKept"
+    assert set(actions(deny)) == EXECUTOR_MUTATING_ACTIONS
+    assert deny["Resource"] == "*"
+    assert deny["Condition"] == {
+        "StringEquals": {f"aws:ResourceTag/{KEEP_TAG_KEY}": KEEP_TAG_VALUE}
+    }
+
+
+def test_executor_role_action_set_is_exact(any_template: assertions.Template):
+    granted = {a for st in executor_statements(any_template) for a in actions(st)}
+    assert granted == EXECUTOR_ACTIONS
+
+
+def test_notifier_role_action_set_is_exact(any_template: assertions.Template):
+    granted = {a for st in role_statements(any_template, NOTIFIER_HANDLER) for a in actions(st)}
+    assert granted == NOTIFIER_ACTIONS
+
+
+def test_dynamodb_grants_carry_leading_keys_except_query(any_template: assertions.Template):
+    seen = 0
+    for st in iam_statements(any_template):
+        dynamodb = {a for a in actions(st) if a.startswith("dynamodb:")}
+        if st["Effect"] != "Allow" or not dynamodb or dynamodb == {"dynamodb:Query"}:
+            continue
+        assert "dynamodb:Query" not in dynamodb, st
+        leading = st["Condition"]["ForAllValues:StringLike"]["dynamodb:LeadingKeys"]
+        assert leading in (["RUN#*"], ["APPROVAL#*"]), st
+        seen += 1
+    assert seen
+
+
+def test_task_callbacks_only_on_the_approval_handler(any_template: assertions.Template):
+    approval_role = function_role_id(any_template, APPROVAL_HANDLER)
+    found = False
+    for role_id, statements in _statements_by_role(any_template).items():
+        for st in statements:
+            if not any(a.startswith("states:SendTask") for a in actions(st)):
+                continue
+            assert role_id == approval_role, role_id
+            assert st["Effect"] == "Allow"
+            assert st["Resource"] == "*"
+            found = True
+    assert found

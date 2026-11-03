@@ -36,6 +36,15 @@ def no_reserve_template() -> assertions.Template:
 
 
 @pytest.fixture(scope="session")
+def live_template() -> assertions.Template:
+    """Template of a stack configured to delete for real and with the schedule off."""
+    app = cdk.App(
+        context={"reportEmail": "test@example.com", "janitorEnabled": "false", "dryRun": "false"}
+    )
+    return assertions.Template.from_stack(LabJanitorStack(app, "LabJanitorStack", env=ENV))
+
+
+@pytest.fixture(scope="session")
 def cli_assembly(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Cloud assembly synthesized the way the CDK CLI does it.
 
