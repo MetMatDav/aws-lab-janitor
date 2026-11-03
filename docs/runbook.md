@@ -82,6 +82,10 @@ After the deploy:
 3. Note the three stack outputs: `StateMachineArn`, `PlansBucketName` and
    `AuditTableName`.
 
+   The stack outputs are currently named with the `Workflow` construct prefix
+   (for example `WorkflowStateMachineArn...`). Use the value, not the key, in
+   scripts.
+
 ## Manual dry-run
 
 Do not wait for Monday. Start an execution with this input, from the Step
@@ -124,6 +128,27 @@ PYTHONPATH=src python -m detector.handler
 
 It prints the dry-run plan as JSON.
 
+## First dry-run: what a healthy run looks like
+
+Shape observed on the first dry-run, numbers only:
+
+- State path: `Defaults`, `Normalize`, `Detect`, `HasCandidates`,
+  `NotifyReportOnly`.
+- Duration: about 25 seconds for 25 regions.
+- The report INVENTORY lists the existing buckets, distributions and
+  dashboards.
+- The ERRORS section lists `internetmonitor:ListMonitors
+  service-unavailable-in-region` for the opt-in regions where the service does
+  not exist. This is expected and harmless.
+- No `ACCOUNT CLEAN` line appears while errors exist.
+- The plans bucket holds `plans/<runId>/plan.json` and
+  `plans/<runId>/report.txt`.
+- The audit table holds `RUN#<runId>` items: one `DETECTED` per finding and
+  one `SUMMARY`.
+
+For now the janitor's own plans bucket appears in the inventory. Excluding the
+janitor's own resources is planned.
+
 ## Things you will see on first deploy
 
 - The CDK CLI prints a notice about unconfigured feature flags. It is harmless.
@@ -147,3 +172,57 @@ npx cdk deploy LabJanitorStack --require-approval never \
 ```
 
 To resume, redeploy without `-c janitorEnabled=false` (it defaults to `true`).
+
+## Troubleshooting
+
+### Deploy fails with "SSM parameter /cdk-bootstrap/<qualifier>/version not found"
+
+Seen on the first deployment (2026-11-03). The `CDKToolkit` stack existed
+(default qualifier `hnb659fds`, bootstrap version 32), but the SSM parameter
+had been deleted outside CloudFormation. `cdk bootstrap` did not recreate it
+because the bootstrap template was unchanged, so there was no change set.
+CloudFormation drift detection on the logical resource `CdkBootstrapVersion`
+reported `DELETED`.
+
+Diagnose with boto3:
+
+```
+python - <<'EOF'
+import boto3
+cfn = boto3.client("cloudformation", region_name="us-east-1")
+ssm = boto3.client("ssm", region_name="us-east-1")
+
+stack = cfn.describe_stacks(StackName="CDKToolkit")["Stacks"][0]
+print([p for p in stack["Parameters"] if p["ParameterKey"] == "Qualifier"])
+print([o for o in stack["Outputs"] if o["OutputKey"] == "BootstrapVersion"])
+
+print(ssm.describe_parameters(
+    ParameterFilters=[{"Key": "Name", "Option": "BeginsWith", "Values": ["/cdk-bootstrap/"]}]
+)["Parameters"])
+
+drift = cfn.detect_stack_resource_drift(
+    StackName="CDKToolkit", LogicalResourceId="CdkBootstrapVersion"
+)
+print(drift["StackResourceDrift"]["StackResourceDriftStatus"])
+EOF
+```
+
+If the stack output shows the version (32 here), no SSM parameter is listed
+under `/cdk-bootstrap/`, and drift reports `DELETED`, the parameter was removed
+outside CloudFormation.
+
+Fix: recreate the parameter with the version CloudFormation expects, then
+deploy again:
+
+```
+aws ssm put-parameter --name /cdk-bootstrap/hnb659fds/version --type String --value 32
+```
+
+A later `cdk bootstrap` that changes the template will update the parameter
+normally.
+
+### Deploy fails on reserved concurrency
+
+The account's Lambda concurrency quota is too low to reserve concurrency. See
+[Account quotas](#account-quotas) and deploy with `-c reservedConcurrency=false`
+until the quota is raised.
