@@ -23,3 +23,20 @@ Settings are CDK context values, passed with `-c key=value` or set in `cdk.json`
   Use it in accounts with a small Lambda concurrency quota (new accounts default
   to 10), where Lambda refuses to reserve concurrency and the deploy fails, until
   a quota increase lands.
+
+## Deploy (dry-run)
+
+Full steps, prerequisites and verification are in [docs/runbook.md](docs/runbook.md).
+In short:
+
+```
+export AWS_PROFILE=<your-admin-profile> AWS_REGION=us-east-1 \
+       CDK_DEFAULT_ACCOUNT=<account-id> CDK_DEFAULT_REGION=us-east-1 \
+       PATH="$PWD/.venv/bin:$PATH"
+npx cdk diff -c reportEmail=you@example.com -c alertEmail=you@example.com
+npx cdk deploy LabJanitorStack --require-approval never \
+  -c reportEmail=you@example.com -c alertEmail=you@example.com
+```
+
+Add `-c reservedConcurrency=false` in accounts with a small Lambda concurrency quota.
+`dryRun` defaults to true, so the stack only reports.
