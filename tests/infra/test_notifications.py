@@ -62,3 +62,62 @@ def test_no_logical_id_or_path_contains_email(cli_template: dict):
         assert "exampleorg" not in logical_id.lower(), logical_id
     for path in paths:
         assert "@" not in path, path
+
+
+def _topic_policy_statements(template: assertions.Template, display_name: str) -> list[dict]:
+    topics = template.find_resources(
+        "AWS::SNS::Topic", {"Properties": {"DisplayName": display_name}}
+    )
+    (topic_id,) = topics
+    return [
+        statement
+        for policy in template.find_resources("AWS::SNS::TopicPolicy").values()
+        if {"Ref": topic_id} in policy["Properties"]["Topics"]
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+    ]
+
+
+def _cloudwatch_allows(statements: list[dict]) -> list[dict]:
+    return [
+        st
+        for st in statements
+        if st["Effect"] == "Allow"
+        and st.get("Principal") == {"Service": "cloudwatch.amazonaws.com"}
+    ]
+
+
+def test_alerts_topic_lets_cloudwatch_alarms_in_this_account_publish(
+    template: assertions.Template,
+):
+    # enforce_ssl replaces the default topic policy, so without this Allow the
+    # alarms could not publish to the alerts topic.
+    topics = template.find_resources(
+        "AWS::SNS::Topic", {"Properties": {"DisplayName": "Lab Janitor Alerts"}}
+    )
+    (alerts_id,) = topics
+    allows = _cloudwatch_allows(_topic_policy_statements(template, "Lab Janitor Alerts"))
+    assert len(allows) == 1
+    (allow,) = allows
+    assert allow["Action"] == "sns:Publish"
+    assert allow["Resource"] == {"Ref": alerts_id}
+    assert allow["Condition"] == {
+        "StringEquals": {"aws:SourceAccount": "123456789012"},
+        "ArnLike": {
+            "aws:SourceArn": {
+                "Fn::Join": [
+                    "",
+                    [
+                        "arn:",
+                        {"Ref": "AWS::Partition"},
+                        ":cloudwatch:us-east-1:123456789012:alarm:*",
+                    ],
+                ]
+            }
+        },
+    }
+
+
+def test_reports_topic_has_no_cloudwatch_allow(template: assertions.Template):
+    statements = _topic_policy_statements(template, "Lab Janitor Reports")
+    assert statements
+    assert not _cloudwatch_allows(statements)

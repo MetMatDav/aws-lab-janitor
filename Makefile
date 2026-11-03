@@ -20,4 +20,4 @@ synth:
 	npx cdk synth --quiet
 
 nag:
-	npx cdk synth --strict
+	npx cdk synth --strict --quiet -c reportEmail=$${JANITOR_REPORT_EMAIL:-ci@example.com}

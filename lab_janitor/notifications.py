@@ -1,5 +1,7 @@
 """SNS topics for the weekly report and for operational alerts."""
 
+from aws_cdk import ArnFormat, Stack
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_sns as sns
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
@@ -25,6 +27,28 @@ class Notifications(Construct):
         )
         self.alerts_topic = sns.Topic(
             self, "AlertsTopic", display_name="Lab Janitor Alerts", enforce_ssl=True
+        )
+        # enforce_ssl creates a topic policy, which replaces the default one, so
+        # CloudWatch alarms (they publish as the cloudwatch.amazonaws.com service
+        # principal) need an explicit Allow, limited to alarms in this account.
+        stack = Stack.of(self)
+        self.alerts_topic.add_to_resource_policy(
+            iam.PolicyStatement(
+                principals=[iam.ServicePrincipal("cloudwatch.amazonaws.com")],
+                actions=["sns:Publish"],
+                resources=[self.alerts_topic.topic_arn],
+                conditions={
+                    "StringEquals": {"aws:SourceAccount": stack.account},
+                    "ArnLike": {
+                        "aws:SourceArn": stack.format_arn(
+                            service="cloudwatch",
+                            resource="alarm",
+                            resource_name="*",
+                            arn_format=ArnFormat.COLON_RESOURCE_NAME,
+                        )
+                    },
+                },
+            )
         )
 
         # Fixed construct ids: topic.add_subscription would name the

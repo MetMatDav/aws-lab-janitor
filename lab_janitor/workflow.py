@@ -69,7 +69,7 @@ class Workflow(Construct):
             subject="[Lab Janitor] Run failed",
             message=sfn.TaskInput.from_text(
                 sfn.JsonPath.format(
-                    "Execution {} failed in state {}: {}",
+                    "Execution {} failed with {}: {}",
                     sfn.JsonPath.execution_id,
                     sfn.JsonPath.string_at("$.error.Error"),
                     sfn.JsonPath.string_at("$.error.Cause"),

@@ -1,13 +1,17 @@
 import json
 
+import aws_cdk as cdk
 import pytest
 from aws_cdk import assertions
 from aws_cdk.assertions import Match
 
+from lab_janitor.stack import LabJanitorStack
+from tests.infra.conftest import ENV
 from tests.infra.helpers import (
     DETECTOR_HANDLER,
     NOTIFIER_HANDLER,
     actions,
+    resources,
     role_statements,
     state_machine_definition,
     state_machine_id,
@@ -34,6 +38,27 @@ TOO_MANY_REQUESTS_RETRY = {
     "BackoffRate": 2,
 }
 FIVE_MINUTES = 300
+# What CDK grants the state machine role for its logs option (see the Step
+# Functions guide, "IAM Policies for logging to CloudWatch Logs").
+LOG_DELIVERY_ACTIONS = {
+    "logs:CreateLogDelivery",
+    "logs:GetLogDelivery",
+    "logs:UpdateLogDelivery",
+    "logs:DeleteLogDelivery",
+    "logs:ListLogDeliveries",
+    "logs:PutResourcePolicy",
+    "logs:DescribeResourcePolicies",
+    "logs:DescribeLogGroups",
+}
+
+
+@pytest.fixture(scope="module")
+def live_template() -> assertions.Template:
+    """Template of a stack configured to delete for real and with the schedule off."""
+    app = cdk.App(
+        context={"reportEmail": "test@example.com", "janitorEnabled": "false", "dryRun": "false"}
+    )
+    return assertions.Template.from_stack(LabJanitorStack(app, "LabJanitorStack", env=ENV))
 
 
 def _topic_id(template: assertions.Template, display_name: str) -> str:
@@ -154,7 +179,10 @@ def test_notify_failure_publishes_to_alerts_then_fails(template: assertions.Temp
     notify = states["NotifyFailure"]
     assert notify["Resource"].endswith(":states:::sns:publish")
     assert notify["Parameters"]["Subject"] == "[Lab Janitor] Run failed"
-    assert notify["Parameters"]["Message.$"].startswith("States.Format(")
+    assert notify["Parameters"]["Message.$"] == (
+        "States.Format('Execution {} failed with {}: {}', "
+        "$$.Execution.Id, $.error.Error, $.error.Cause)"
+    )
     assert notify["Next"] == "RunFailed"
     assert states["RunFailed"]["Type"] == "Fail"
 
@@ -228,6 +256,16 @@ def test_schedule_runs_monday_morning_with_dry_run_input(template: assertions.Te
     assert target["Arn"] == {"Ref": state_machine_id(template)}
     (dlq_id,) = template.find_resources("AWS::SQS::Queue")
     assert target["DeadLetterConfig"] == {"Arn": {"Fn::GetAtt": [dlq_id, "Arn"]}}
+
+
+def test_schedule_follows_janitor_enabled_and_dry_run_context(
+    live_template: assertions.Template,
+):
+    (schedule,) = live_template.find_resources("AWS::Scheduler::Schedule").values()
+    properties = schedule["Properties"]
+    assert properties["State"] == "DISABLED"
+    assert json.loads(properties["Target"]["Input"]) == {"dryRun": False, "minAgeDays": 7}
+    assert '"dryRun":false' in properties["Target"]["Input"]
 
 
 # --- alarms --------------------------------------------------------------------------------
@@ -338,3 +376,15 @@ def test_state_machine_role_delete_actions_are_only_log_delivery(template: asser
         if a.split(":")[1].startswith(FORBIDDEN_PREFIXES)
     }
     assert deletes == {"logs:DeleteLogDelivery"}
+
+
+def test_state_machine_wildcard_resource_is_only_log_delivery(template: assertions.Template):
+    # The AwsSolutions-IAM5[Resource::*] acknowledgment on this role covers the
+    # log-delivery grant only; a wider grant on "*" must fail here first.
+    statements = statements_of_role(template, state_machine_role_id(template))
+    wildcard = [st for st in statements if st["Effect"] == "Allow" and "*" in resources(st)]
+    assert len(wildcard) == 1
+    (statement,) = wildcard
+    assert resources(statement) == ["*"]
+    assert set(actions(statement)) == LOG_DELIVERY_ACTIONS
+    assert len(actions(statement)) == len(LOG_DELIVERY_ACTIONS)

@@ -624,6 +624,36 @@
                 "Ref": "NotificationsAlertsTopicDFE3487E"
               },
               "Sid": "AllowPublishThroughSSLOnly"
+            },
+            {
+              "Action": "sns:Publish",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":cloudwatch:us-east-1:123456789012:alarm:*"
+                      ]
+                    ]
+                  }
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012"
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudwatch.amazonaws.com"
+              },
+              "Resource": {
+                "Ref": "NotificationsAlertsTopicDFE3487E"
+              },
+              "Sid": "1"
             }
           ],
           "Version": "2012-10-17"
@@ -1123,7 +1153,7 @@
               {
                 "Ref": "NotificationsAlertsTopicDFE3487E"
               },
-              "\",\"Message.$\":\"States.Format('Execution {} failed in state {}: {}', $$.Execution.Id, $.error.Error, $.error.Cause)\",\"Subject\":\"[Lab Janitor] Run failed\"}},\"RunFailed\":{\"Type\":\"Fail\"}},\"TimeoutSeconds\":7200}"
+              "\",\"Message.$\":\"States.Format('Execution {} failed with {}: {}', $$.Execution.Id, $.error.Error, $.error.Cause)\",\"Subject\":\"[Lab Janitor] Run failed\"}},\"RunFailed\":{\"Type\":\"Fail\"}},\"TimeoutSeconds\":7200}"
             ]
           ]
         },
