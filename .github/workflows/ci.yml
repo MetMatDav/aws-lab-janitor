@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Test
+        run: pytest -q
+      - name: CDK synth
+        # Remove continue-on-error once the CDK app exists (Task 13).
+        continue-on-error: true
+        run: npx cdk synth --quiet -c reportEmail=ci@example.com
+        env:
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+          CDK_DEFAULT_REGION: us-east-1
+      - name: cfn-lint
+        # Remove continue-on-error once the CDK app exists (Task 13).
+        continue-on-error: true
+        run: cfn-lint --ignore-checks W3005 cdk.out/*.template.json

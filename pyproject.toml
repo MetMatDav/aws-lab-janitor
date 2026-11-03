@@ -1,0 +1,23 @@
+[project]
+name = "aws-lab-janitor"
+version = "0.1.0"
+description = "Weekly serverless janitor for an AWS lab account"
+requires-python = ">=3.13,<3.14"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["cdk.out", ".venv", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "BLE", "S", "PIE", "PL", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["shared", "detector", "notifier", "lab_janitor"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
