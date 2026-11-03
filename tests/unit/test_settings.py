@@ -46,3 +46,14 @@ def test_invalid_env_min_age_is_rejected(value):
     env = dict(os.environ, MIN_AGE_DAYS=value)
     with pytest.raises(ValueError, match="MIN_AGE_DAYS must be an integer >= 0"):
         load_settings({}, env)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("true", True), ("True", False), ("1", False), ("", False), (None, False)],
+)
+def test_deletions_enabled_requires_exact_true(raw, expected):
+    env = {k: v for k, v in os.environ.items() if k != "DELETIONS_ENABLED"}
+    if raw is not None:
+        env["DELETIONS_ENABLED"] = raw
+    assert load_settings({}, env).deletions_enabled is expected

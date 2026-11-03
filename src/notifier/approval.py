@@ -13,7 +13,7 @@ from shared.approvals import (
     expiry_for,
     short_hash,
 )
-from shared.plan_store import plan_key
+from shared.plan_store import PlanIntegrityError, plan_key
 from shared.plan_summary import render_summary, summarize_plan
 
 logger = logging.getLogger("notifier")
@@ -21,10 +21,6 @@ logger = logging.getLogger("notifier")
 SUBJECT_PREFIX = "[Lab Janitor] Approval needed"
 AUTH_MODES = ("link", "iam", "both")
 CONFIRMATION_LENGTH = 4
-
-
-class PlanIntegrityError(Exception):
-    """The plan in S3 is not the one the detector hashed."""
 
 
 def approval_subject(summary: dict) -> str:

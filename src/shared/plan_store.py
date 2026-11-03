@@ -13,6 +13,10 @@ PLAN_CONTENT_TYPE = "application/json"
 REPORT_CONTENT_TYPE = "text/plain; charset=utf-8"
 
 
+class PlanIntegrityError(Exception):
+    """The plan in S3, the detector's hash and the approval record do not all agree."""
+
+
 @dataclass(frozen=True)
 class StoredPlan:
     """Where a run's plan and report were written, and the plan's sha256."""

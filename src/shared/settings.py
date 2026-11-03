@@ -23,6 +23,8 @@ class Settings:
     audit_table: str
     reports_topic_arn: str
     region: str
+    # Only the executor reads it; any value other than the exact string "true" keeps it off.
+    deletions_enabled: bool = False
 
 
 def _env_min_age_days(env: Mapping[str, str]) -> int:
@@ -81,4 +83,5 @@ def load_settings(event: dict, env: Mapping[str, str]) -> Settings:
         audit_table=env.get("AUDIT_TABLE", ""),
         reports_topic_arn=env.get("REPORTS_TOPIC_ARN", ""),
         region=env.get("AWS_REGION", DEFAULT_REGION),
+        deletions_enabled=env.get("DELETIONS_ENABLED") == "true",
     )
