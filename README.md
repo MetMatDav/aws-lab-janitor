@@ -13,3 +13,13 @@ Work in progress; see docs/superpowers/specs.
 ## Toolchain
 
 aws-cdk CLI 2.1147.0 or later is required by aws-cdk-lib 2.275.0 (cloud assembly schema 55).
+
+## Configuration
+
+Settings are CDK context values, passed with `-c key=value` or set in `cdk.json`.
+`reportEmail` is required (or set `JANITOR_REPORT_EMAIL`).
+
+- `reservedConcurrency=false`: do not reserve Lambda concurrency for the detector.
+  Use it in accounts with a small Lambda concurrency quota (new accounts default
+  to 10), where Lambda refuses to reserve concurrency and the deploy fails, until
+  a quota increase lands.

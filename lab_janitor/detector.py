@@ -82,8 +82,11 @@ class Detector(Construct):
             code=code,
             memory_size=512,
             timeout=Duration.minutes(5),
-            # One sweep at a time: two concurrent runs would race on the plan.
-            reserved_concurrent_executions=1,
+            # Accounts with a small concurrency quota (new accounts default to 10)
+            # cannot reserve concurrency; disable with -c reservedConcurrency=false
+            # until a quota increase lands. The detector only reads, so this is
+            # not a safety property in this slice.
+            reserved_concurrent_executions=1 if config.reserved_concurrency else None,
             log_group=self.log_group,
             logging_format=lambda_.LoggingFormat.JSON,
             environment={

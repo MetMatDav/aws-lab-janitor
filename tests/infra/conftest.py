@@ -27,6 +27,13 @@ def template(stack: LabJanitorStack) -> assertions.Template:
 
 
 @pytest.fixture(scope="session")
+def no_reserve_template() -> assertions.Template:
+    """Template synthesized with ``reservedConcurrency=false``."""
+    app = cdk.App(context={"reportEmail": "test@example.com", "reservedConcurrency": "false"})
+    return assertions.Template.from_stack(LabJanitorStack(app, "LabJanitorStack", env=ENV))
+
+
+@pytest.fixture(scope="session")
 def cli_assembly(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Cloud assembly synthesized the way the CDK CLI does it.
 

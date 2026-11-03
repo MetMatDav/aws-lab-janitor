@@ -1,4 +1,9 @@
-"""Deployment configuration read from CDK context."""
+"""Deployment configuration read from CDK context.
+
+Context keys: ``reportEmail`` (required, or ``JANITOR_REPORT_EMAIL``),
+``alertEmail``, ``dryRun``, ``minAgeDays``, ``scheduleTimezone``,
+``scheduleHour``, ``janitorEnabled`` and ``reservedConcurrency``.
+"""
 
 import os
 from dataclasses import dataclass
@@ -61,6 +66,7 @@ class JanitorConfig:
     schedule_timezone: str
     schedule_hour: int
     janitor_enabled: bool
+    reserved_concurrency: bool
 
     @classmethod
     def from_node(cls, node: Node) -> "JanitorConfig":
@@ -84,4 +90,5 @@ class JanitorConfig:
                 MAX_SCHEDULE_HOUR,
             ),
             janitor_enabled=_flag(node.try_get_context("janitorEnabled"), default=True),
+            reserved_concurrency=_flag(node.try_get_context("reservedConcurrency"), default=True),
         )

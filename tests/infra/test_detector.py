@@ -30,6 +30,11 @@ def test_detector_function_settings(template: assertions.Template):
     )
 
 
+def test_detector_without_reserved_concurrency(no_reserve_template: assertions.Template):
+    function = _detector(no_reserve_template)
+    assert "ReservedConcurrentExecutions" not in function["Properties"]
+
+
 def test_detector_environment(template: assertions.Template):
     variables = _detector(template)["Properties"]["Environment"]["Variables"]
     assert {k: variables[k] for k in lambda_env()} == lambda_env()

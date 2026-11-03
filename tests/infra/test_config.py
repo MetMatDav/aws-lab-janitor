@@ -35,6 +35,14 @@ def test_other_falsy_looking_values_keep_dry_run(value: object):
     assert _config(dryRun=value).dry_run is True
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"), [("false", False), ("False", False), (False, False)]
+)
+def test_reserved_concurrency_flag(value: object, expected: bool):
+    assert _config(reservedConcurrency=value).reserved_concurrency is expected
+    assert _config().reserved_concurrency is True
+
+
 def test_integer_settings_accept_cli_strings():
     config = _config(minAgeDays="0", scheduleHour="23")
     assert (config.min_age_days, config.schedule_hour) == (0, 23)
