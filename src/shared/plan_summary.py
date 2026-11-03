@@ -42,8 +42,10 @@ def render_summary(summary: dict) -> str:
         line = (
             f"[{item['kind']}] {item['resourceId']} ({item['region']}) {_one_line(item['reason'])}"
         )
-        if item["estimatedMonthlyUsd"] is not None:
-            line += f" ~${item['estimatedMonthlyUsd']:.2f}/mo"
+        # .get: a summary read back from DynamoDB has no key for an unknown (None) cost.
+        cost = item.get("estimatedMonthlyUsd")
+        if cost is not None:
+            line += f" ~${cost:.2f}/mo"
         lines.append(line)
     omitted = summary["candidateCount"] - len(summary["candidates"])
     if summary["truncated"]:

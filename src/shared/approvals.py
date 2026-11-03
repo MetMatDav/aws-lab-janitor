@@ -6,6 +6,7 @@ through conditional updates, so two concurrent decisions cannot both win.
 Task tokens are never logged.
 """
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -45,6 +46,11 @@ class AlreadyDecidedError(ApprovalError):
 
 class ExpiredError(ApprovalError):
     """The approval window closed before a decision was made."""
+
+
+def short_hash(approval_id: str) -> str:
+    """Stable short fingerprint for logs: the approval id grants access, so it is never logged."""
+    return hashlib.sha256(approval_id.encode()).hexdigest()[:16]
 
 
 def expiry_for(created_at: datetime) -> datetime:
@@ -194,7 +200,8 @@ class ApprovalStore:
             if not _is_conditional_failure(error):
                 raise
             logger.warning(
-                "approval was not DECIDING, nothing to revert", extra={"id": approval_id}
+                "approval was not DECIDING, nothing to revert",
+                extra={"approvalIdHash": short_hash(approval_id)},
             )
 
     def finalize(self, approval_id: str, status: str, decided_at: str) -> None:
@@ -236,7 +243,10 @@ class ApprovalStore:
         except ClientError as error:
             if not _is_conditional_failure(error):
                 raise
-            logger.info("approval already decided, not expiring", extra={"id": approval_id})
+            logger.info(
+                "approval already decided, not expiring",
+                extra={"approvalIdHash": short_hash(approval_id)},
+            )
 
     @staticmethod
     def _key(approval_id: str) -> dict:

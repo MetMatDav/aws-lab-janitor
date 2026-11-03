@@ -1,3 +1,4 @@
+from shared.dynamo import deserialize, serialize
 from shared.plan_summary import render_summary, summarize_plan
 
 
@@ -88,3 +89,15 @@ def test_render_summary_without_truncation_has_no_more_line():
     text = render_summary(summarize_plan(plan_with(candidate("nat-1", cost=1.0))))
 
     assert text == "[nat-gateway] nat-1 (us-east-1) idle for 30 days ~$1.00/mo"
+
+
+def test_render_summary_of_a_summary_read_back_from_dynamodb():
+    summary = summarize_plan(plan_with(candidate("nat-1", cost=1.5), candidate("nat-2")))
+    stored = deserialize(serialize({"planSummary": summary}))["planSummary"]
+
+    text = render_summary(stored)
+
+    assert text.splitlines() == [
+        "[nat-gateway] nat-1 (us-east-1) idle for 30 days ~$1.50/mo",
+        "[nat-gateway] nat-2 (us-east-1) idle for 30 days",
+    ]

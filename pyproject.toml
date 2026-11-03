@@ -16,7 +16,7 @@ select = ["E", "F", "I", "UP", "B", "BLE", "S", "PIE", "PL", "RUF"]
 "tests/*" = ["S101", "PLR2004"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["shared", "detector", "notifier", "lab_janitor"]
+known-first-party = ["shared", "detector", "notifier", "approval", "lab_janitor"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
