@@ -86,7 +86,20 @@ deploy. Use `--require-approval never` only in non-interactive pipelines.
 After the deploy:
 
 1. Confirm the two SNS subscription emails (reports and alerts) once. Until
-   you do, nothing is delivered to that address.
+   you do, nothing is delivered to that address, and SNS does not count a
+   publish to a topic with no confirmed subscriber as a failure. Check before
+   the first manual run:
+
+   ```bash
+   aws sns list-subscriptions --query "Subscriptions[?contains(TopicArn, 'LabJanitorStack')].[SubscriptionArn,Endpoint]" --output table
+   ```
+
+   A row whose first column reads `PendingConfirmation` has not been confirmed.
+   The confirmation email comes from `no-reply@sns.amazonaws.com` with the
+   subject `AWS Notification - Subscription Confirmation`; look in spam. The
+   link expires after three days. To send it again, open the subscription in
+   the SNS console and choose **Request confirmation**, or call `aws sns
+   subscribe` again with the same topic, protocol and endpoint.
 2. `dryRun` defaults to `true`, so the stack only reports.
 3. Note the three stack outputs: `StateMachineArn`, `PlansBucketName` and
    `AuditTableName`.
@@ -236,6 +249,16 @@ In this incident the qualifier was `hnb659fds` and the version was 32.
 
 A later `cdk bootstrap` that changes the template will update the parameter
 normally.
+
+### A run succeeded but no report email arrived
+
+The notifier logs `weekly report published (messageId=...)` as soon as SNS
+accepts the message. Delivery is separate. If the subscription is still
+pending, the message is dropped silently: `NumberOfNotificationsDelivered`
+and `NumberOfNotificationsFailed` both stay at 0 for that minute, and the
+only `Delivered` datapoint on the topic is the confirmation email itself,
+stamped at stack creation time. Follow the confirmation step under "Deploy
+in dry-run", then start another manual run.
 
 ### Deploy fails on reserved concurrency
 

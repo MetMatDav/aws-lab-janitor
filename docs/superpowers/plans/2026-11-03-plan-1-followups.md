@@ -26,6 +26,7 @@ Items deferred from the Plan 1 reviews (task reviews and the whole-branch review
 
 - `createTrail=dataEventsOnly`: an organization Control Tower trail already delivers management events for this account.
 - Before the controlled deletion test, switch the old `AwsJanitorStack` to dry-run.
+- Delivery evidence, not just publish evidence: the first manual run (2026-11-03) published to a reports topic whose email subscription was still `PendingConfirmation`, so the report vanished with no failure metric and no alarm. Add a `NumberOfNotificationsDelivered` check to the runbook's healthy-run shape and consider an alarm on `Published - Delivered > 0` for the reports topic (the alerts topic cannot alarm on itself; document that gap).
 
 ## Plan 4 (story and publication)
 
