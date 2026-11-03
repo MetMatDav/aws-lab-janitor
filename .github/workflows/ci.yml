@@ -24,14 +24,12 @@ jobs:
         run: ruff check . && ruff format --check .
       - name: Test
         run: pytest -q
-      - name: CDK synth
-        # Remove continue-on-error once the CDK app exists (Task 13).
-        continue-on-error: true
-        run: npx cdk synth --quiet -c reportEmail=ci@example.com
+      - name: CDK synth (cdk-nag, strict)
+        run: npx cdk synth --strict --quiet -c reportEmail=ci@example.com
         env:
           CDK_DEFAULT_ACCOUNT: "123456789012"
           CDK_DEFAULT_REGION: us-east-1
       - name: cfn-lint
-        # Remove continue-on-error once the CDK app exists (Task 13).
-        continue-on-error: true
-        run: cfn-lint --ignore-checks W3005 cdk.out/*.template.json
+        # "--" ends --ignore-checks, which takes several values and would
+        # otherwise swallow the template path and make cfn-lint read stdin.
+        run: cfn-lint --ignore-checks W3005 -- cdk.out/*.template.json

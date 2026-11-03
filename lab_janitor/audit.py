@@ -6,6 +6,8 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
+from lab_janitor.nag import acknowledge
+
 RESOURCE_INDEX = "by-resource"
 PLANS_PREFIX = "plans/"
 PLAN_EXPIRATION_DAYS = 400
@@ -62,6 +64,14 @@ class AuditStore(Construct):
                     noncurrent_version_expiration=Duration.days(NONCURRENT_PLAN_EXPIRATION_DAYS),
                 )
             ],
+        )
+        acknowledge(
+            self.plans_bucket,
+            {
+                "AwsSolutions::AwsSolutions-S1": (
+                    "Append-only versioned bucket; CloudTrail data events are added in Plan 3"
+                )
+            },
         )
         self._plans_arn = self.plans_bucket.arn_for_objects(f"{PLANS_PREFIX}*")
 

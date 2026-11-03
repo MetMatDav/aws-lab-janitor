@@ -9,6 +9,7 @@ from constructs import Construct
 from lab_janitor.audit import PLANS_PREFIX, AuditStore
 from lab_janitor.config import JanitorConfig
 from lab_janitor.markers import lambda_env
+from lab_janitor.nag import acknowledge, acknowledge_janitor_function
 
 HANDLER = "detector.handler.handler"
 
@@ -119,3 +120,14 @@ class Detector(Construct):
         if role is None:  # Function always creates a role when none is passed in.
             raise RuntimeError("detector function has no execution role")
         audit.allow_plan_writes(role.role_arn)
+
+        acknowledge_janitor_function(self.function, audit.plans_bucket)
+        acknowledge(
+            role,
+            {
+                "AwsSolutions::AwsSolutions-IAM5[Resource::*]": (
+                    "Account-wide inventory: EC2 Describe* actions do not support "
+                    "resource-level permissions"
+                )
+            },
+        )

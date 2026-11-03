@@ -1,8 +1,11 @@
-"""Helpers to inspect IAM statements in a synthesized template."""
+"""Helpers to inspect IAM statements and the state machine in a synthesized template."""
+
+import json
 
 from aws_cdk import assertions
 
 DETECTOR_HANDLER = "detector.handler.handler"
+NOTIFIER_HANDLER = "notifier.handler.handler"
 
 
 def _references(value: object, logical_id: str) -> bool:
@@ -67,7 +70,11 @@ def role_statements(template: assertions.Template, handler: str) -> list[dict]:
     Includes every ``AWS::IAM::Policy`` attached to the role and the role's
     inline policies.
     """
-    role_id = function_role_id(template, handler)
+    return statements_of_role(template, function_role_id(template, handler))
+
+
+def statements_of_role(template: assertions.Template, role_id: str) -> list[dict]:
+    """Statements of the attached ``AWS::IAM::Policy`` resources and inline policies of a role."""
     policies = template.find_resources("AWS::IAM::Policy")
     attached = [
         statement
@@ -82,3 +89,36 @@ def role_statements(template: assertions.Template, handler: str) -> list[dict]:
 def detector_statements(template: assertions.Template) -> list[dict]:
     """Statements granted to the detector function's execution role."""
     return role_statements(template, DETECTOR_HANDLER)
+
+
+def state_machine_id(template: assertions.Template) -> str:
+    """Logical id of the only state machine in the template."""
+    machines = template.find_resources("AWS::StepFunctions::StateMachine")
+    assert len(machines) == 1, "expected exactly one state machine"
+    (logical_id,) = machines
+    return logical_id
+
+
+def state_machine_role_id(template: assertions.Template) -> str:
+    """Logical id of the state machine's execution role."""
+    machine = template.find_resources("AWS::StepFunctions::StateMachine")[
+        state_machine_id(template)
+    ]
+    return machine["Properties"]["RoleArn"]["Fn::GetAtt"][0]
+
+
+def state_machine_definition(template: assertions.Template) -> dict:
+    """The state machine definition as a dict.
+
+    The ``DefinitionString`` is an ``Fn::Join``; every non-string part (a
+    ``Ref`` or ``Fn::GetAtt`` to an ARN) is replaced by the literal ``"X"``
+    before the joined string is parsed.
+    """
+    machine = template.find_resources("AWS::StepFunctions::StateMachine")[
+        state_machine_id(template)
+    ]
+    definition = machine["Properties"]["DefinitionString"]
+    if isinstance(definition, str):
+        return json.loads(definition)
+    parts = definition["Fn::Join"][1]
+    return json.loads("".join(part if isinstance(part, str) else "X" for part in parts))

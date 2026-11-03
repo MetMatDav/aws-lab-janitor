@@ -4,6 +4,8 @@
 import os
 
 import aws_cdk as cdk
+from aws_cdk import Validations
+from cdk_nag import AwsSolutionsChecks, ServerlessChecks
 
 from lab_janitor.stack import LabJanitorStack
 
@@ -25,4 +27,7 @@ LabJanitorStack(
         account=os.environ["CDK_DEFAULT_ACCOUNT"], region=os.environ["CDK_DEFAULT_REGION"]
     ),
 )
+# Policy validation plugins: findings fail `cdk synth --strict` unless they are
+# acknowledged next to the construct they concern, with a reason.
+Validations.of(app).add_plugins(AwsSolutionsChecks(app, verbose=True), ServerlessChecks(app))
 app.synth()

@@ -1,0 +1,1347 @@
+{
+  "Description": "Lab janitor: weekly sweep of lab leftovers with plan, approval and audit trail",
+  "Outputs": {
+    "WorkflowAuditTableNameE7DE7067": {
+      "Value": {
+        "Ref": "AuditTable18A3095C"
+      }
+    },
+    "WorkflowPlansBucketNameE29204CC": {
+      "Value": {
+        "Ref": "AuditPlansBucketDEC41664"
+      }
+    },
+    "WorkflowStateMachineArn73E0F973": {
+      "Value": {
+        "Ref": "WorkflowStateMachine8F1B1C15"
+      }
+    }
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>"
+    }
+  },
+  "Resources": {
+    "AuditPlansBucketDEC41664": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 400,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 30
+              },
+              "Prefix": "plans/",
+              "Status": "Enabled"
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "AuditPlansBucketPolicyEE5E4EC1": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "AuditPlansBucketDEC41664"
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AuditPlansBucketDEC41664",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AuditPlansBucketDEC41664",
+                          "Arn"
+                        ]
+                      },
+                      "/*"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": [
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion"
+              ],
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:PrincipalArn": "arn:aws:iam::123456789012:root"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AuditPlansBucketDEC41664",
+                        "Arn"
+                      ]
+                    },
+                    "/plans/*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "s3:PutObject",
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:PrincipalArn": {
+                    "Fn::GetAtt": [
+                      "DetectorFunctionServiceRole9E6382DE",
+                      "Arn"
+                    ]
+                  }
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AuditPlansBucketDEC41664",
+                        "Arn"
+                      ]
+                    },
+                    "/plans/*"
+                  ]
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      },
+      "Type": "AWS::S3::BucketPolicy"
+    },
+    "AuditTable18A3095C": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "resourceId",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "at",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "by-resource",
+            "KeySchema": [
+              {
+                "AttributeName": "resourceId",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "at",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE"
+          }
+        ],
+        "Replicas": [
+          {
+            "GlobalSecondaryIndexes": [
+              {
+                "IndexName": "by-resource"
+              }
+            ],
+            "PointInTimeRecoverySpecification": {
+              "PointInTimeRecoveryEnabled": true
+            },
+            "Region": "us-east-1",
+            "Tags": [
+              {
+                "Key": "ManagedBy",
+                "Value": "cdk"
+              },
+              {
+                "Key": "Project",
+                "Value": "aws-lab-janitor"
+              }
+            ]
+          }
+        ],
+        "TimeToLiveSpecification": {
+          "AttributeName": "ttl",
+          "Enabled": true
+        }
+      },
+      "Type": "AWS::DynamoDB::GlobalTable",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "DetectorFunctionDD6A428A": {
+      "DependsOn": [
+        "DetectorFunctionServiceRoleDefaultPolicy02B4D23F",
+        "DetectorFunctionServiceRole9E6382DE"
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64"
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "ASSET.zip"
+        },
+        "Description": "Lab janitor detector: sweeps all regions and writes the weekly plan",
+        "Environment": {
+          "Variables": {
+            "AUDIT_TABLE": {
+              "Ref": "AuditTable18A3095C"
+            },
+            "KEEP_TAG_KEY": "janitor",
+            "KEEP_TAG_VALUE": "keep",
+            "LAB_NAME_PREFIX": "LAB-",
+            "LAB_TAG_KEY": "Purpose",
+            "LAB_TAG_VALUE": "lab",
+            "MIN_AGE_DAYS": "7",
+            "PLANS_BUCKET": {
+              "Ref": "AuditPlansBucketDEC41664"
+            }
+          }
+        },
+        "Handler": "detector.handler.handler",
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "DetectorLogs1FFA9796"
+          }
+        },
+        "MemorySize": 512,
+        "ReservedConcurrentExecutions": 1,
+        "Role": {
+          "Fn::GetAtt": [
+            "DetectorFunctionServiceRole9E6382DE",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.13",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "Timeout": 300
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "DetectorFunctionServiceRole9E6382DE": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "DetectorFunctionServiceRoleDefaultPolicy02B4D23F": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "ec2:DescribeRegions",
+                "ec2:DescribeInstances",
+                "ec2:DescribeNatGateways",
+                "ec2:DescribeAddresses",
+                "ec2:DescribeVolumes",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeImages",
+                "ec2:DescribeVpcEndpoints",
+                "ec2:DescribeNetworkInterfaces",
+                "elasticloadbalancing:DescribeLoadBalancers",
+                "elasticloadbalancing:DescribeTags",
+                "rds:DescribeDBInstances",
+                "rds:DescribeDBClusters",
+                "rds:ListTagsForResource",
+                "elasticache:DescribeCacheClusters",
+                "elasticache:ListTagsForResource",
+                "internetmonitor:ListMonitors",
+                "internetmonitor:ListTagsForResource",
+                "cloudwatch:ListDashboards",
+                "cloudwatch:ListTagsForResource",
+                "s3:ListAllMyBuckets",
+                "s3:GetBucketTagging",
+                "cloudfront:ListDistributions",
+                "sts:GetCallerIdentity"
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+              "Sid": "DetectorReadOnlySweep"
+            },
+            {
+              "Action": "s3:PutObject",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AuditPlansBucketDEC41664",
+                        "Arn"
+                      ]
+                    },
+                    "/plans/*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "dynamodb:PutItem",
+              "Condition": {
+                "ForAllValues:StringLike": {
+                  "dynamodb:LeadingKeys": [
+                    "RUN#*"
+                  ]
+                }
+              },
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "AuditTable18A3095C",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "dynamodb:Query",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AuditTable18A3095C",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AuditTable18A3095C",
+                          "Arn"
+                        ]
+                      },
+                      "/index/by-resource"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "DetectorFunctionServiceRoleDefaultPolicy02B4D23F",
+        "Roles": [
+          {
+            "Ref": "DetectorFunctionServiceRole9E6382DE"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    },
+    "DetectorLogs1FFA9796": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "RetentionInDays": 90,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "DlqD1FAA4AD": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "MessageRetentionPeriod": 1209600,
+        "SqsManagedSseEnabled": true,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::SQS::Queue",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "DlqPolicyF16811D6": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DlqD1FAA4AD",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "sqs:SendMessage",
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Ref": "NotificationsReportsTopic7F0B91E5"
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "sns.amazonaws.com"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DlqD1FAA4AD",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "sqs:SendMessage",
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Ref": "NotificationsAlertsTopicDFE3487E"
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "sns.amazonaws.com"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DlqD1FAA4AD",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Queues": [
+          {
+            "Ref": "DlqD1FAA4AD"
+          }
+        ]
+      },
+      "Type": "AWS::SQS::QueuePolicy"
+    },
+    "NotificationsAlertsEmail5C12F92E": {
+      "Properties": {
+        "Endpoint": "test@example.com",
+        "Protocol": "email",
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": [
+              "DlqD1FAA4AD",
+              "Arn"
+            ]
+          }
+        },
+        "TopicArn": {
+          "Ref": "NotificationsAlertsTopicDFE3487E"
+        }
+      },
+      "Type": "AWS::SNS::Subscription"
+    },
+    "NotificationsAlertsTopicDFE3487E": {
+      "Properties": {
+        "DisplayName": "Lab Janitor Alerts",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::SNS::Topic"
+    },
+    "NotificationsAlertsTopicPolicy3FF8DE10": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Ref": "NotificationsAlertsTopicDFE3487E"
+              },
+              "Sid": "AllowPublishThroughSSLOnly"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Topics": [
+          {
+            "Ref": "NotificationsAlertsTopicDFE3487E"
+          }
+        ]
+      },
+      "Type": "AWS::SNS::TopicPolicy"
+    },
+    "NotificationsReportsEmail06A09C1C": {
+      "Properties": {
+        "Endpoint": "test@example.com",
+        "Protocol": "email",
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": [
+              "DlqD1FAA4AD",
+              "Arn"
+            ]
+          }
+        },
+        "TopicArn": {
+          "Ref": "NotificationsReportsTopic7F0B91E5"
+        }
+      },
+      "Type": "AWS::SNS::Subscription"
+    },
+    "NotificationsReportsTopic7F0B91E5": {
+      "Properties": {
+        "DisplayName": "Lab Janitor Reports",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::SNS::Topic"
+    },
+    "NotificationsReportsTopicPolicy5F39FBBE": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sns:Publish",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": "*",
+              "Resource": {
+                "Ref": "NotificationsReportsTopic7F0B91E5"
+              },
+              "Sid": "AllowPublishThroughSSLOnly"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Topics": [
+          {
+            "Ref": "NotificationsReportsTopic7F0B91E5"
+          }
+        ]
+      },
+      "Type": "AWS::SNS::TopicPolicy"
+    },
+    "NotifierFunctionAF3DBB87": {
+      "DependsOn": [
+        "NotifierFunctionServiceRoleDefaultPolicy856A5281",
+        "NotifierFunctionServiceRoleE31A96FF"
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64"
+        ],
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-123456789012-us-east-1",
+          "S3Key": "ASSET.zip"
+        },
+        "Description": "Lab janitor notifier: publishes the weekly report",
+        "Environment": {
+          "Variables": {
+            "PLANS_BUCKET": {
+              "Ref": "AuditPlansBucketDEC41664"
+            },
+            "REPORTS_TOPIC_ARN": {
+              "Ref": "NotificationsReportsTopic7F0B91E5"
+            }
+          }
+        },
+        "Handler": "notifier.handler.handler",
+        "LoggingConfig": {
+          "LogFormat": "JSON",
+          "LogGroup": {
+            "Ref": "NotifierLogsEC358FAB"
+          }
+        },
+        "MemorySize": 256,
+        "Role": {
+          "Fn::GetAtt": [
+            "NotifierFunctionServiceRoleE31A96FF",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.13",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "Timeout": 60
+      },
+      "Type": "AWS::Lambda::Function"
+    },
+    "NotifierFunctionServiceRoleDefaultPolicy856A5281": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AuditPlansBucketDEC41664",
+                        "Arn"
+                      ]
+                    },
+                    "/plans/*"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "NotificationsReportsTopic7F0B91E5"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "NotifierFunctionServiceRoleDefaultPolicy856A5281",
+        "Roles": [
+          {
+            "Ref": "NotifierFunctionServiceRoleE31A96FF"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    },
+    "NotifierFunctionServiceRoleE31A96FF": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "NotifierLogsEC358FAB": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "RetentionInDays": 90,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "SchedulerRoleForTarget9b648f4D60F6B8": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012",
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":scheduler:us-east-1:123456789012:schedule-group/default"
+                      ]
+                    ]
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "scheduler.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "SchedulerRoleForTarget9b648fDefaultPolicyE2A4C123": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "WorkflowStateMachine8F1B1C15"
+              }
+            },
+            {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "DlqD1FAA4AD",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "SchedulerRoleForTarget9b648fDefaultPolicyE2A4C123",
+        "Roles": [
+          {
+            "Ref": "SchedulerRoleForTarget9b648f4D60F6B8"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    },
+    "WorkflowDlqNotEmpty37BA9502": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "NotificationsAlertsTopicDFE3487E"
+          }
+        ],
+        "AlarmDescription": "Lab janitor: a scheduler start or an email delivery failed and landed in the dead-letter queue",
+        "ComparisonOperator": "GreaterThanThreshold",
+        "Dimensions": [
+          {
+            "Name": "QueueName",
+            "Value": {
+              "Fn::GetAtt": [
+                "DlqD1FAA4AD",
+                "QueueName"
+              ]
+            }
+          }
+        ],
+        "EvaluationPeriods": 1,
+        "MetricName": "ApproximateNumberOfMessagesVisible",
+        "Namespace": "AWS/SQS",
+        "OKActions": [
+          {
+            "Ref": "NotificationsAlertsTopicDFE3487E"
+          }
+        ],
+        "Period": 300,
+        "Statistic": "Maximum",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "Threshold": 0,
+        "TreatMissingData": "notBreaching"
+      },
+      "Type": "AWS::CloudWatch::Alarm"
+    },
+    "WorkflowExecutionFailedFFC42D78": {
+      "Properties": {
+        "AlarmActions": [
+          {
+            "Ref": "NotificationsAlertsTopicDFE3487E"
+          }
+        ],
+        "AlarmDescription": "Lab janitor: a weekly execution failed or timed out",
+        "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+        "EvaluationPeriods": 1,
+        "Metrics": [
+          {
+            "Expression": "failed + timedOut",
+            "Id": "expr_1",
+            "ReturnData": true
+          },
+          {
+            "Id": "failed",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "WorkflowStateMachine8F1B1C15"
+                    }
+                  }
+                ],
+                "MetricName": "ExecutionsFailed",
+                "Namespace": "AWS/States"
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          },
+          {
+            "Id": "timedOut",
+            "MetricStat": {
+              "Metric": {
+                "Dimensions": [
+                  {
+                    "Name": "StateMachineArn",
+                    "Value": {
+                      "Ref": "WorkflowStateMachine8F1B1C15"
+                    }
+                  }
+                ],
+                "MetricName": "ExecutionsTimedOut",
+                "Namespace": "AWS/States"
+              },
+              "Period": 300,
+              "Stat": "Sum"
+            },
+            "ReturnData": false
+          }
+        ],
+        "OKActions": [
+          {
+            "Ref": "NotificationsAlertsTopicDFE3487E"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "Threshold": 1,
+        "TreatMissingData": "notBreaching"
+      },
+      "Type": "AWS::CloudWatch::Alarm"
+    },
+    "WorkflowScheduleF6749A87": {
+      "Properties": {
+        "Description": "Starts the lab janitor every Monday",
+        "FlexibleTimeWindow": {
+          "Mode": "OFF"
+        },
+        "ScheduleExpression": "cron(0 9 ? * MON *)",
+        "ScheduleExpressionTimezone": "America/Bogota",
+        "State": "ENABLED",
+        "Target": {
+          "Arn": {
+            "Ref": "WorkflowStateMachine8F1B1C15"
+          },
+          "DeadLetterConfig": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "DlqD1FAA4AD",
+                "Arn"
+              ]
+            }
+          },
+          "Input": "{\"dryRun\":true,\"minAgeDays\":7}",
+          "RetryPolicy": {
+            "MaximumEventAgeInSeconds": 3600,
+            "MaximumRetryAttempts": 2
+          },
+          "RoleArn": {
+            "Fn::GetAtt": [
+              "SchedulerRoleForTarget9b648f4D60F6B8",
+              "Arn"
+            ]
+          }
+        }
+      },
+      "Type": "AWS::Scheduler::Schedule"
+    },
+    "WorkflowStateMachine8F1B1C15": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "WorkflowStateMachineRoleDefaultPolicyB2EAF58E",
+        "WorkflowStateMachineRoleAB27BF0D"
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{\"StartAt\":\"Defaults\",\"States\":{\"Defaults\":{\"Type\":\"Pass\",\"Result\":{\"dryRun\":true,\"minAgeDays\":7},\"ResultPath\":\"$.defaults\",\"Next\":\"Normalize\"},\"Normalize\":{\"Type\":\"Pass\",\"Parameters\":{\"config.$\":\"States.JsonMerge($.defaults, $$.Execution.Input, false)\"},\"Next\":\"Detect\"},\"Detect\":{\"Next\":\"HasCandidates\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":\"$.detect\",\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "DetectorFunctionDD6A428A",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"config.$\":\"$.config\"}},\"HasCandidates\":{\"Type\":\"Choice\",\"Choices\":[{\"And\":[{\"Variable\":\"$.config.dryRun\",\"IsPresent\":true},{\"Variable\":\"$.config.dryRun\",\"BooleanEquals\":false},{\"Variable\":\"$.detect.candidateCount\",\"NumericGreaterThan\":0}],\"Next\":\"ApprovalNotYetImplemented\"}],\"Default\":\"NotifyReportOnly\"},\"NotifyReportOnly\":{\"End\":true,\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "NotifierFunctionAF3DBB87",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"mode\":\"report\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\"}},\"ApprovalNotYetImplemented\":{\"Type\":\"Pass\",\"Next\":\"NotifyReportOnly\"},\"NotifyFailure\":{\"Next\":\"RunFailed\",\"Type\":\"Task\",\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::sns:publish\",\"Parameters\":{\"TopicArn\":\"",
+              {
+                "Ref": "NotificationsAlertsTopicDFE3487E"
+              },
+              "\",\"Message.$\":\"States.Format('Execution {} failed in state {}: {}', $$.Execution.Id, $.error.Error, $.error.Cause)\",\"Subject\":\"[Lab Janitor] Run failed\"}},\"RunFailed\":{\"Type\":\"Fail\"}},\"TimeoutSeconds\":7200}"
+            ]
+          ]
+        },
+        "LoggingConfiguration": {
+          "Destinations": [
+            {
+              "CloudWatchLogsLogGroup": {
+                "LogGroupArn": {
+                  "Fn::GetAtt": [
+                    "WorkflowStateMachineLogs25053C9F",
+                    "Arn"
+                  ]
+                }
+              }
+            }
+          ],
+          "Level": "ERROR"
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "WorkflowStateMachineRoleAB27BF0D",
+            "Arn"
+          ]
+        },
+        "StateMachineType": "STANDARD",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "WorkflowStateMachineLogs25053C9F": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "RetentionInDays": 90,
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::Logs::LogGroup",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "WorkflowStateMachineRoleAB27BF0D": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":states:us-east-1:123456789012:stateMachine:*"
+                      ]
+                    ]
+                  }
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012"
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "WorkflowStateMachineRoleDefaultPolicyB2EAF58E": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "DetectorFunctionDD6A428A",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "DetectorFunctionDD6A428A",
+                          "Arn"
+                        ]
+                      },
+                      ":*"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "NotifierFunctionAF3DBB87",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "NotifierFunctionAF3DBB87",
+                          "Arn"
+                        ]
+                      },
+                      ":*"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": "sns:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "NotificationsAlertsTopicDFE3487E"
+              }
+            },
+            {
+              "Action": [
+                "logs:CreateLogDelivery",
+                "logs:GetLogDelivery",
+                "logs:UpdateLogDelivery",
+                "logs:DeleteLogDelivery",
+                "logs:ListLogDeliveries",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups"
+              ],
+              "Effect": "Allow",
+              "Resource": "*"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "WorkflowStateMachineRoleDefaultPolicyB2EAF58E",
+        "Roles": [
+          {
+            "Ref": "WorkflowStateMachineRoleAB27BF0D"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    }
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5"
+                  ],
+                  {
+                    "Ref": "BootstrapVersion"
+                  }
+                ]
+              }
+            ]
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI."
+        }
+      ]
+    }
+  }
+}
