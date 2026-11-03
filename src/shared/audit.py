@@ -54,22 +54,28 @@ class AuditClient:
         run_id: str,
         region: str,
         resource_id: str,
+        kind: str,
         event: str,
         actor: str,
         dry_run: bool,
         detail: dict,
         at: datetime,
     ) -> None:
-        """Record ``event`` for one resource in run ``run_id``."""
+        """Record ``event`` for one resource in run ``run_id``.
+
+        The sort key includes ``kind`` because resource ids are only unique per
+        kind: a global S3 bucket and a CloudWatch dashboard may share a name.
+        """
         self._put_new(
             {
                 "pk": f"RUN#{run_id}",
-                "sk": f"RESOURCE#{region}#{resource_id}#{event}",
+                "sk": f"RESOURCE#{region}#{kind}#{resource_id}#{event}",
                 "event": event,
                 "at": _iso(at),
                 "actor": actor,
                 "dryRun": dry_run,
                 "resourceId": resource_id,
+                "kind": kind,
                 "region": region,
                 "detail": detail,
             }

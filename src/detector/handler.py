@@ -177,6 +177,7 @@ def handler(event: dict, context) -> dict:
                 run_id=run_id,
                 region=item["region"],
                 resource_id=item["resourceId"],
+                kind=item["kind"],
                 event=event_name,
                 actor=ACTOR,
                 dry_run=settings.dry_run,

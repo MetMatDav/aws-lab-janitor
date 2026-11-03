@@ -22,31 +22,42 @@ def audit(stub: Stubber) -> AuditClient:
     return AuditClient(stub.client, TABLE)
 
 
-def event_item(**detail_attr) -> dict:
+def event_item(
+    detail_attr: dict | None = None,
+    *,
+    region: str = "us-east-1",
+    kind: str = "ec2-instance",
+    resource_id: str = "i-0abc",
+    event: str = "PROPOSED",
+) -> dict:
     return {
         "pk": {"S": f"RUN#{RUN_ID}"},
-        "sk": {"S": "RESOURCE#us-east-1#i-0abc#PROPOSED"},
-        "event": {"S": "PROPOSED"},
+        "sk": {"S": f"RESOURCE#{region}#{kind}#{resource_id}#{event}"},
+        "event": {"S": event},
         "at": {"S": "2026-11-02T12:00:05+00:00"},
         "actor": {"S": "lambda:detector"},
         "dryRun": {"BOOL": False},
-        "resourceId": {"S": "i-0abc"},
-        "region": {"S": "us-east-1"},
-        "detail": {"M": detail_attr},
+        "resourceId": {"S": resource_id},
+        "kind": {"S": kind},
+        "region": {"S": region},
+        "detail": {"M": detail_attr or {}},
     }
 
 
-def put_event(client: AuditClient, detail: dict) -> None:
-    client.put_run_event(
-        run_id=RUN_ID,
-        region="us-east-1",
-        resource_id="i-0abc",
-        event="PROPOSED",
-        actor="lambda:detector",
-        dry_run=False,
-        detail=detail,
-        at=AT,
-    )
+def put_event(client: AuditClient, detail: dict, **overrides) -> None:
+    values = {
+        "run_id": RUN_ID,
+        "region": "us-east-1",
+        "resource_id": "i-0abc",
+        "kind": "ec2-instance",
+        "event": "PROPOSED",
+        "actor": "lambda:detector",
+        "dry_run": False,
+        "detail": detail,
+        "at": AT,
+    }
+    values.update(overrides)
+    client.put_run_event(**values)
 
 
 def put_params(item: dict) -> dict:
@@ -72,7 +83,7 @@ def query_params(resource_id: str, start_key: dict | None = None) -> dict:
 
 
 def test_put_run_event_is_conditional(ddb_stub):
-    ddb_stub.add_response("put_item", {}, put_params(event_item(kind={"S": "ec2:instance"})))
+    ddb_stub.add_response("put_item", {}, put_params(event_item({"kind": {"S": "ec2:instance"}})))
 
     put_event(audit(ddb_stub), {"kind": "ec2:instance"})
 
@@ -88,19 +99,40 @@ def test_put_run_event_converts_floats_and_drops_none(ddb_stub):
         "nested": {"sizeGb": 1.5, "skip": None, "tags": ["a", 2.25]},
     }
     expected = event_item(
-        kind={"S": "ec2:volume"},
-        estimatedMonthlyUsd={"N": "0.08"},
-        ageDays={"N": "12"},
-        nested={
-            "M": {
-                "sizeGb": {"N": "1.5"},
-                "tags": {"L": [{"S": "a"}, {"N": "2.25"}]},
-            }
-        },
+        {
+            "kind": {"S": "ec2:volume"},
+            "estimatedMonthlyUsd": {"N": "0.08"},
+            "ageDays": {"N": "12"},
+            "nested": {
+                "M": {
+                    "sizeGb": {"N": "1.5"},
+                    "tags": {"L": [{"S": "a"}, {"N": "2.25"}]},
+                }
+            },
+        }
     )
     ddb_stub.add_response("put_item", {}, put_params(expected))
 
     put_event(audit(ddb_stub), detail)
+
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_same_name_bucket_and_dashboard_are_distinct_records(ddb_stub):
+    for kind in ("s3-bucket", "cw-dashboard"):
+        ddb_stub.add_response(
+            "put_item",
+            {},
+            put_params(
+                event_item(region="global", kind=kind, resource_id="LAB-shared", event="DETECTED")
+            ),
+        )
+
+    client = audit(ddb_stub)
+    for kind in ("s3-bucket", "cw-dashboard"):
+        put_event(
+            client, {}, region="global", kind=kind, resource_id="LAB-shared", event="DETECTED"
+        )
 
     ddb_stub.assert_no_pending_responses()
 

@@ -87,13 +87,14 @@ class FakeAudit:
         self.summaries: list[tuple[str, dict, datetime]] = []
 
     def put_run_event(  # noqa: PLR0913, PLR0917
-        self, run_id, region, resource_id, event, actor, dry_run, detail, at
+        self, run_id, region, resource_id, kind, event, actor, dry_run, detail, at
     ) -> None:
         self.events.append(
             {
                 "run_id": run_id,
                 "region": region,
                 "resource_id": resource_id,
+                "kind": kind,
                 "event": event,
                 "actor": actor,
                 "dry_run": dry_run,
@@ -232,8 +233,32 @@ def test_audit_events_detected_and_proposed(harness):
         assert event["dry_run"] is False
         assert event["at"] == at
         assert event["detail"]["planSha256"] == result["planSha256"]
+        assert event["kind"] == event["detail"]["kind"]
+    kinds = {(e["resource_id"], e["event"]): e["kind"] for e in events}
+    assert kinds == {
+        ("nat-1", "DETECTED"): "nat-gateway",
+        ("nat-1", "PROPOSED"): "nat-gateway",
+        ("vol-1", "DETECTED"): "ebs-volume",
+        ("dash-1", "DETECTED"): "cw-dashboard",
+    }
 
     assert harness.audit.summaries == [(result["runId"], result, at)]
+
+
+def test_same_name_bucket_and_dashboard_get_distinct_events(harness):
+    harness.global_findings = [
+        finding("LAB-shared", region="global", kind="s3-bucket", estimated_monthly_usd=None),
+        finding("LAB-shared", region="global", kind="cw-dashboard", estimated_monthly_usd=None),
+    ]
+
+    result = handler_module.handler({"config": {"dryRun": True}}, None)
+
+    detected = [e for e in harness.audit.events if e["event"] == "DETECTED"]
+    assert result["findingCount"] == len(detected) == 2
+    assert {(e["region"], e["kind"], e["resource_id"]) for e in detected} == {
+        ("global", "s3-bucket", "LAB-shared"),
+        ("global", "cw-dashboard", "LAB-shared"),
+    }
 
 
 def test_region_failure_becomes_error_not_crash(harness, monkeypatch):
