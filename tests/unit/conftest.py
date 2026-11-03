@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import boto3
 import pytest
@@ -12,9 +12,31 @@ from botocore.client import BaseClient
 from botocore.stub import Stubber
 
 from detector.sweep import SweepContext
+from shared.findings import ErrorFinding, Finding
 from shared.settings import load_settings
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
+REGION = "us-east-1"
+
+
+def days_ago(days: int) -> datetime:
+    """Timestamp ``days`` whole days before ``NOW``."""
+    return NOW - timedelta(days=days)
+
+
+def by_id(findings: list[Finding], kind: str) -> dict[str, Finding]:
+    """Findings of ``kind`` keyed by resource id."""
+    return {f.resource_id: f for f in findings if f.kind == kind}
+
+
+def run_detector(
+    detector: Callable[..., None], ctx: SweepContext, region: str = REGION
+) -> tuple[list[Finding], list[ErrorFinding]]:
+    """Run ``detector`` for ``region`` and return what it appended."""
+    findings: list[Finding] = []
+    errors: list[ErrorFinding] = []
+    detector(region, ctx, findings, errors)
+    return findings, errors
 
 
 class FakeClients:

@@ -2,9 +2,10 @@
 
 from datetime import datetime
 
+from detector.detectors.common import first_blocker, make_finding
 from detector.sweep import SweepContext, collect, safe
 from shared.findings import ErrorFinding, Finding
-from shared.marking import age_days, is_kept, is_lab, is_lab_tagged, tag_value
+from shared.marking import age_days, is_lab, is_lab_tagged, tag_value
 from shared.pricing import monthly_usd
 from shared.settings import Settings
 
@@ -100,17 +101,9 @@ def detect_ec2(
 def _finding(
     region: str, kind: str, resource_id: str, tags: list[dict], settings: Settings, **fields
 ) -> Finding:
-    """Build a Finding; ``fields`` carries ``detail`` plus any non-default verdict fields."""
-    defaults = {"candidate": False, "reason": "", "age_days": None, "estimated_monthly_usd": None}
-    return Finding(
-        region=region,
-        kind=kind,
-        resource_id=resource_id,
-        arn=None,
-        lab=is_lab(tag_value(tags, "Name"), tags, settings),
-        tags=tags,
-        **(defaults | fields),
-    )
+    """Build an EC2-family Finding; these resources are named by their ``Name`` tag."""
+    lab = is_lab(tag_value(tags, "Name"), tags, settings)
+    return make_finding(region, kind, resource_id, lab, tags=tags, **fields)
 
 
 def _instance(instance: dict, region: str, ctx: SweepContext) -> Finding:
@@ -154,7 +147,7 @@ def _address(address: dict, region: str, ctx: SweepContext) -> Finding:
     associated = bool(address.get("AssociationId"))
     candidate, reason = False, ""
     if is_lab_tagged(tags, settings):
-        blocker = _blocker(tags, settings, "associated" if associated else None)
+        blocker = first_blocker(tags, settings, "associated" if associated else None)
         if blocker is None and allocation_id and not ctx.was_proposed_live(allocation_id):
             blocker = "not proposed in a previous live run"
         # Legacy addresses without an AllocationId are never candidates.
@@ -274,13 +267,6 @@ def _lab_tag(settings: Settings) -> str:
     return f"tag {settings.tag_key}={settings.tag_value}"
 
 
-def _blocker(tags: list[dict], settings: Settings, *checks: str | None) -> str | None:
-    """First reason that blocks a lab-tagged resource: the keep tag, then ``checks`` in order."""
-    if is_kept(tags, settings):
-        return f"tagged {settings.keep_tag_key}={settings.keep_tag_value}"
-    return next((check for check in checks if check), None)
-
-
 def _aged_verdict(
     tags: list[dict],
     settings: Settings,
@@ -293,7 +279,7 @@ def _aged_verdict(
         return False, ""
     too_young = age is None or age < settings.min_age_days
     age_blocker = f"below minimum age ({age} days)" if too_young else None
-    reason = _blocker(tags, settings, blocker, age_blocker)
+    reason = first_blocker(tags, settings, blocker, age_blocker)
     return (False, reason) if reason else (True, candidate_reason)
 
 

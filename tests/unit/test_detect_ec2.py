@@ -1,12 +1,9 @@
-from datetime import timedelta
-
 from botocore.exceptions import UnknownServiceError
 from botocore.stub import Stubber
 
 from detector.detectors.ec2 import detect_ec2
-from tests.unit.conftest import NOW
+from tests.unit.conftest import REGION, by_id, days_ago, run_detector
 
-REGION = "us-east-1"
 LAB = [{"Key": "Purpose", "Value": "lab"}]
 KEEP = [*LAB, {"Key": "janitor", "Value": "keep"}]
 NOT_TERMINATED = ["pending", "running", "shutting-down", "stopping", "stopped"]
@@ -59,17 +56,7 @@ def stub_ec2(
 
 
 def run(ctx, region: str = REGION):
-    findings, errors = [], []
-    detect_ec2(region, ctx, findings, errors)
-    return findings, errors
-
-
-def days_ago(days: int):
-    return NOW - timedelta(days=days)
-
-
-def by_id(findings, kind):
-    return {f.resource_id: f for f in findings if f.kind == kind}
+    return run_detector(detect_ec2, ctx, region)
 
 
 def volume(vol_id, *, days=42, state="available", tags=LAB, **extra):
