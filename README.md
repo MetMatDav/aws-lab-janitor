@@ -1,12 +1,13 @@
 # aws-lab-janitor
 
 A weekly serverless janitor that finds forgotten resources in an AWS lab account
-and reports them. This first release (Plan 1) only detects and never deletes
-anything: an EventBridge Scheduler schedule starts a Step Functions workflow
-every Monday, a detector Lambda sweeps every enabled region plus the global
+and reports them. The first release (Plan 1) only detects and never deletes
+anything; Plan 2 adds the owner's approval and an executor that stays disarmed
+until Plan 3. The detection pipeline: an EventBridge Scheduler schedule starts a Step
+Functions workflow every Monday, a detector Lambda sweeps every enabled region plus the global
 services in dry-run mode, writes an immutable plan and its report to a versioned
 S3 bucket, records each finding in a DynamoDB audit table, and a notifier Lambda
-emails the weekly report through SNS. Approval and deletion come in later plans.
+emails the weekly report through SNS. Actual deletion comes in a later plan.
 
 Work in progress; see docs/superpowers/specs.
 
@@ -23,6 +24,9 @@ Settings are CDK context values, passed with `-c key=value` or set in `cdk.json`
   Use it in accounts with a small Lambda concurrency quota (new accounts default
   to 10), where Lambda refuses to reserve concurrency and the deploy fails, until
   a quota increase lands.
+- `approvalAuth=link|iam|both` (default `link`) picks how the owner approves a plan;
+  `iam` and `both` need `-c approverRoleArn=<role ARN>`. `dryRun=false` is the only
+  switch that arms deletions. See the runbook's Approval flow.
 
 ## Deploy (dry-run)
 

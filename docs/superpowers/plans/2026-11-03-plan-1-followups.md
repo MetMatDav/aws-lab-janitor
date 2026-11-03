@@ -1,36 +1,38 @@
 # Plan 1 follow-ups
 
-Items deferred from the Plan 1 reviews (task reviews and the whole-branch review), triaged by where they belong. Nothing here blocks the dry-run deployment.
+Items deferred from the Plan 1 reviews (task reviews and the whole-branch review), triaged by where they belong. Plan 2 folded in the items under "Done in Plan 2"; the rest is still open. Nothing here blocks the dry-run deployment.
 
-## Spec corrections to make before Plan 2 starts
+## Done in Plan 2
 
-- **EIP two-run rule cannot fire.** The handler writes `PROPOSED` only for candidates, and an EIP becomes a candidate only if a previous live `PROPOSED` exists, so no EIP is ever proposed. Fix: write a distinct event (for example `ELIGIBLE`) for idle, lab-tagged, unkept EIPs and require it from the immediately previous live run; update spec sections 4.2, 4.5 and 4.8. Today this fails safe (EIPs are never candidates).
-- **Audit sort key includes the kind:** `RESOURCE#<region>#<kind>#<resourceId>#<EVENT>`. Spec 4.5 still shows the old key.
-- **Run id format and candidate key:** `YYYYMMDDTHHMMSSZ-<4 hex>` and `resourceId` (plan wins over the spec 4.4 example).
-- `put_run_summary` hardcodes `actor = "lambda:detector"`; the executor needs an `actor` parameter.
-- `allow_plan_writes` must be called exactly once (a second call would deny every writer); the executor must not call it.
-- The stack outputs carry the `Workflow` construct prefix; declare them at stack level or set export names.
-
-## Plan 2 (approval flow and executor)
-
-- Exclude the janitor's own resources (tag `Project=aws-lab-janitor`) from the inventory.
-- Pass the time budget to the remaining paginated listings (NAT gateways, VPC endpoints, images, RDS, ELB, global, monitor) or lower sweep retries; add a mid-loop deadline test.
-- Route the four tag-lookup variants through `read_tags` in `common.py`; use `.get("ARN")` for ElastiCache clusters.
-- Tests still missing: prefix shorter than 3, empty markers, lowercase tag shape, `is_kept` negatives, region fallback, `to_dict` shapes, `enabled_regions`, `main()` never writes, subject boundary 99/100, config parsing matrix, delete-Deny `Resource` pinned, managed policies and `NotAction` in the IAM guardrail helpers (extend to the executor role).
-- Use `Stack.partition` instead of a hardcoded `arn:aws` in the plans bucket policy.
-- `NotifyFailure` uses `States.Format` with `$.error.Cause`; a caught error without `Cause` would raise `States.Runtime` (the `ExecutionFailed` alarm is the backstop).
-- "AMI-backed" reason only set for lab snapshots; the unreachable `attached` reason; `global` as a service label; audit warnings without `runId`.
-- Request a Lambda concurrency quota increase (to at least 101) and redeploy without `-c reservedConcurrency=false`.
+- `put_run_summary` takes an `actor`; the executor and the state machine write their own events with their own actors.
+- `allow_plan_writes` is called exactly once (in the detector construct); the executor does not call it.
+- Stack outputs are declared at stack level: `StateMachineArn`, `PlansBucketName`, `AuditTableName`, `ApprovalApiUrl`.
+- `Stack.partition` replaces the hardcoded `arn:aws` in the plans bucket policy (and in the new policies).
+- The janitor's own resources (tag `Project=aws-lab-janitor`) are excluded from the inventory.
+- `NotifyFailure` no longer raises `States.Runtime` when a caught error has no `Cause`.
+- The EIP two-run rule works: idle, lab-tagged, unkept EIPs get an `ELIGIBLE` event and are proposed once a live ELIGIBLE record is old enough.
+- The audit sort key carries the kind: `RESOURCE#<region>#<kind>#<resourceId>#<EVENT>`.
+- Run id format and candidate key: spec v3 (done before Plan 2 started).
 
 ## Plan 3 (operations, CloudTrail, cutover)
 
+Items marked "deferred from Plan 2" were on the Plan 2 list and were not folded in.
+
+- Verify with `simulate-custom-policy` that the keep-tag Deny is honored by `cloudwatch:DeleteDashboards` and `internetmonitor:DeleteMonitor`. This is unverified: those actions may not evaluate the tag condition on their resources, and the executor's per-item re-verification is the effective guard today.
+- `allowedRegions` limitation: the executor calls the dashboard API through us-east-1, so a deployment that sets `allowedRegions` without `us-east-1` fails every dashboard deletion with `AccessDenied` (recorded as `FAILED`). Either always allow `us-east-1` for dashboards or reject such a configuration at synth time.
+- Deferred from Plan 2: pass the time budget to the remaining paginated listings (NAT gateways, VPC endpoints, images, RDS, ELB, global, monitor) or lower sweep retries; add a mid-loop deadline test.
+- Deferred from Plan 2: route the four tag-lookup variants through `read_tags` in `common.py`; use `.get("ARN")` for ElastiCache clusters.
+- Deferred from Plan 2: tests still missing: prefix shorter than 3, empty markers, lowercase tag shape, `is_kept` negatives, region fallback, `to_dict` shapes, `enabled_regions`, `main()` never writes, subject boundary 99/100, config parsing matrix, delete-Deny `Resource` pinned, managed policies and `NotAction` in the IAM guardrail helpers (extend to the executor role).
+- Deferred from Plan 2: "AMI-backed" reason only set for lab snapshots; the unreachable `attached` reason; `global` as a service label; audit warnings without `runId`.
+- Deferred from Plan 2: request a Lambda concurrency quota increase (to at least 101) and redeploy without `-c reservedConcurrency=false`.
 - `createTrail=dataEventsOnly`: an organization Control Tower trail already delivers management events for this account.
 - Before the controlled deletion test, switch the old `AwsJanitorStack` to dry-run.
-- Delivery evidence, not just publish evidence: the first manual run (2026-11-03) published to a reports topic whose email subscription was still `PendingConfirmation`, so the report vanished with no failure metric and no alarm. Add a `NumberOfNotificationsDelivered` check to the runbook's healthy-run shape and consider an alarm on `Published - Delivered > 0` for the reports topic (the alerts topic cannot alarm on itself; document that gap).
+- Delivery evidence, not just publish evidence: the first manual run (2026-11-03) published to a reports topic whose email subscription was still `PendingConfirmation`, so the report vanished with no failure metric and no alarm. Add a `NumberOfNotificationsDelivered` check to the runbook's healthy-run shape and consider an alarm on `Published - Delivered > 0` for the reports topic (the alerts topic cannot alarm on itself; document that gap). The approvals topic has the same gap.
 
 ## Plan 4 (story and publication)
 
 - Reword the cdk-nag reasons that are only partly true (shared DLQ also receives SNS redrive; the Python 3.13 "roadmap" entry; `AwsSolutions-S1` depends on `createTrail`).
 - Owner decision: commit author identity (the current history carries the owner's personal address); switch to a GitHub noreply address before publishing if desired.
-- Update the spec with the corrections above; update the plan text that lacks `--` in the cfn-lint command.
+- Update the plan text that lacks `--` in the cfn-lint command.
 - Infra test fixtures (`stack`/`template`) synthesize without the `cdk.json` feature flags; align them with the CLI synth so the snapshot matches a real `cdk synth`.
+- Spec text updates from Plan 2: the link POST order is verify first, claim second (a wrong confirmation code returns 400 before any write, so the record stays PENDING); the approval id is a `States.UUID()` value generated by the state machine, not 32 random bytes; the state machine execution timeout is 74 h (72 h approval window plus 2 h).
