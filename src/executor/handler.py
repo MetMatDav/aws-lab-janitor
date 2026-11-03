@@ -52,6 +52,17 @@ def build_dependencies(
     return clients, store, approvals, audit, clients.get("events", settings.region)
 
 
+def required_seconds(kind: str) -> int:
+    """Seconds that must remain before an item of ``kind`` starts.
+
+    A monitor may be polled for up to ``MONITOR_WAIT_SECONDS`` before its delete, so it
+    needs that window on top of the reserve.
+    """
+    if kind == "internet-monitor":
+        return RESERVE_SECONDS + deleters.MONITOR_WAIT_SECONDS
+    return RESERVE_SECONDS
+
+
 def check_integrity(detect: dict, approval_id: str, plan_sha: str, found) -> None:
     """Raise ``PlanIntegrityError`` unless the plan read, Detect and the approval all agree."""
     run_id = detect["runId"]
@@ -95,7 +106,7 @@ class _Run:
 
     def gate(self, item: dict) -> str | None:
         """Why ``item`` is skipped before any AWS call, or None: time, arming, then kind."""
-        if self.remaining_seconds() < RESERVE_SECONDS:
+        if self.remaining_seconds() < required_seconds(item["kind"]):
             return "time-budget"
         if not self.armed:
             return "deletions-disabled"

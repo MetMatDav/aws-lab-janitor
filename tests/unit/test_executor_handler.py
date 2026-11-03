@@ -423,6 +423,21 @@ def test_time_budget_skips_the_rest(make_harness):
     assert harness.deletes == []
 
 
+def test_monitor_needs_the_poll_window_in_the_budget(make_harness):
+    harness = make_harness([candidate("snap-1"), candidate("LAB-mon", kind="internet-monitor")])
+    harness.fake_aws()
+
+    result = handler_module.handler(event(), FakeContext(remaining_ms=60_000))
+
+    assert outcomes(result) == [
+        ("snap-1", "DELETED", "planned snap-1"),
+        ("LAB-mon", "SKIPPED", "time-budget"),
+    ]
+    assert harness.rechecks == harness.deletes == ["snap-1"]
+    assert handler_module.required_seconds("internet-monitor") == 90
+    assert handler_module.required_seconds("ebs-snapshot") == 30
+
+
 def test_no_delete_call_for_a_resource_absent_from_the_plan(
     make_harness, stub_factory, fake_clients
 ):
