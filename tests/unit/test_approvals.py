@@ -14,10 +14,13 @@ from shared.approvals import (
     ApprovalStore,
     ExpiredError,
     expiry_for,
+    short_hash,
 )
 
 TABLE = "audit"
 APPROVAL_ID = "a1b2"
+# Error messages carry the hash, never the id (the id grants access to the approval).
+ID_HASH = short_hash(APPROVAL_ID)
 PK = {"S": "APPROVAL#a1b2"}
 SK = {"S": "META"}
 KEY = {"pk": PK, "sk": SK}
@@ -174,7 +177,7 @@ def test_create_raises_when_record_exists(ddb_stub):
         },
     )
 
-    with pytest.raises(ApprovalExistsError):
+    with pytest.raises(ApprovalExistsError, match=f"^{ID_HASH}$"):
         store(ddb_stub).create(RECORD, "tok")
     ddb_stub.assert_no_pending_responses()
 
@@ -243,7 +246,7 @@ def test_claim_sets_deciding_with_pending_and_unexpired_condition(ddb_stub):
 def test_claim_raises_already_decided_when_old_status_is_not_pending(ddb_stub):
     conditional_failure(ddb_stub, claim_params(), {**RECORD_ITEM, "status": {"S": "APPROVED"}})
 
-    with pytest.raises(AlreadyDecidedError):
+    with pytest.raises(AlreadyDecidedError, match=f"^{ID_HASH}$"):
         store(ddb_stub).claim(APPROVAL_ID, NOW, APPROVER)
     ddb_stub.assert_no_pending_responses()
 
@@ -251,7 +254,7 @@ def test_claim_raises_already_decided_when_old_status_is_not_pending(ddb_stub):
 def test_claim_raises_expired_when_old_status_is_pending(ddb_stub):
     conditional_failure(ddb_stub, claim_params(), RECORD_ITEM)
 
-    with pytest.raises(ExpiredError):
+    with pytest.raises(ExpiredError, match=f"^{ID_HASH}$"):
         store(ddb_stub).claim(APPROVAL_ID, NOW, APPROVER)
     ddb_stub.assert_no_pending_responses()
 
@@ -259,7 +262,7 @@ def test_claim_raises_expired_when_old_status_is_pending(ddb_stub):
 def test_claim_raises_expired_when_the_old_item_is_missing(ddb_stub):
     conditional_failure(ddb_stub, claim_params())
 
-    with pytest.raises(ExpiredError):
+    with pytest.raises(ExpiredError, match=f"^{ID_HASH}$"):
         store(ddb_stub).claim(APPROVAL_ID, NOW, APPROVER)
 
 
@@ -316,7 +319,7 @@ def test_finalize_records_the_decision(ddb_stub):
 def test_finalize_raises_already_decided_on_conditional_failure(ddb_stub):
     conditional_failure(ddb_stub, finalize_params())
 
-    with pytest.raises(AlreadyDecidedError):
+    with pytest.raises(AlreadyDecidedError, match=f"^{ID_HASH}$"):
         store(ddb_stub).finalize(APPROVAL_ID, "APPROVED", NOW)
     ddb_stub.assert_no_pending_responses()
 
@@ -359,7 +362,7 @@ def test_refresh_token_replaces_the_token_of_a_pending_approval(ddb_stub):
 def test_refresh_token_raises_already_decided_on_conditional_failure(ddb_stub):
     conditional_failure(ddb_stub, refresh_token_params())
 
-    with pytest.raises(AlreadyDecidedError):
+    with pytest.raises(AlreadyDecidedError, match=f"^{ID_HASH}$"):
         store(ddb_stub).refresh_token(APPROVAL_ID, "new-token")
     ddb_stub.assert_no_pending_responses()
 

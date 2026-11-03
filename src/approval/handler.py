@@ -276,6 +276,7 @@ def handler(event: dict, context, now: datetime | None = None) -> dict:
     timestamp = (now or datetime.now(UTC)).isoformat()
     try:
         return ROUTES[route](event, approval_id, timestamp, log)
-    except Exception:
-        log.exception("approval request failed")
+    except Exception as error:  # noqa: BLE001 - every failure becomes a 500 page
+        # No traceback: chained exception messages can carry the approval id or the token.
+        log.error("approval request failed (%s: %s)", type(error).__name__, error, exc_info=False)
         return _error(route, 500)

@@ -64,20 +64,29 @@ class FakeStore:
 class FakeApprovals:
     def __init__(self, approval: ApprovalRecord | None) -> None:
         self.approval = approval
+        # Statuses served by the first reads, in order, before ``approval`` itself.
+        self.statuses: list[str] = []
         self.reads: list[str] = []
 
     def get(self, approval_id: str):
         self.reads.append(approval_id)
-        return None if self.approval is None else (self.approval, "secret-task-token")
+        if self.approval is None:
+            return None
+        if self.statuses:
+            return record(status=self.statuses.pop(0)), "secret-task-token"
+        return self.approval, "secret-task-token"
 
 
 class FakeAudit:
     def __init__(self) -> None:
         self.events: list[dict] = []
+        self.error: Exception | None = None
 
     def put_run_event(  # noqa: PLR0913, PLR0917
         self, run_id, region, resource_id, kind, event, actor, dry_run, detail, at
     ) -> None:
+        if self.error is not None:
+            raise self.error
         self.events.append(
             {
                 "run_id": run_id,
@@ -231,14 +240,49 @@ def test_integrity_mismatch_raises_before_any_write(make_harness, store_sha, det
     assert harness.events.entries == []
 
 
-@pytest.mark.parametrize("status", [DECIDING, "PENDING", "REJECTED", "EXPIRED"])
-def test_approval_not_approved_raises(make_harness, status):
+@pytest.mark.parametrize("status", ["PENDING", "REJECTED", "EXPIRED"])
+def test_approval_not_approved_raises_without_waiting(make_harness, status):
     harness = make_harness([candidate("snap-1")])
     harness.approvals.approval = record(status=status)
+    waits: list[float] = []
 
-    with pytest.raises(PlanIntegrityError):
-        handler_module.handler(event(), FakeContext())
+    with pytest.raises(PlanIntegrityError, match="approval is not APPROVED"):
+        handler_module.handler(event(), FakeContext(), sleep=waits.append)
 
+    assert waits == []
+    assert harness.approvals.reads == [APPROVAL_ID]
+    assert harness.audit.events == []
+    assert harness.events.entries == []
+
+
+def test_deciding_approval_is_re_read_until_approved(make_harness):
+    harness = make_harness([candidate("snap-1")])
+    harness.fake_aws()
+    harness.approvals.statuses = [DECIDING, DECIDING]
+    waits: list[float] = []
+
+    result = handler_module.handler(event(), FakeContext(), sleep=waits.append)
+
+    assert harness.approvals.reads == [APPROVAL_ID] * 3
+    assert waits == [handler_module.DECIDING_WAIT_SECONDS] * 2 == [1, 1]
+    assert outcomes(result) == [("snap-1", "DELETED", "planned snap-1")]
+
+
+def test_approval_still_deciding_after_the_retries_raises(make_harness):
+    harness = make_harness([candidate("snap-1")])
+    harness.fake_aws()
+    harness.approvals.approval = record(status=DECIDING)
+    waits: list[float] = []
+
+    with pytest.raises(PlanIntegrityError, match="approval is not APPROVED"):
+        handler_module.handler(event(), FakeContext(), sleep=waits.append)
+
+    assert handler_module.DECIDING_RETRIES == 5
+    # One read, then one re-read after each of the five waits.
+    assert harness.approvals.reads == [APPROVAL_ID] * 6
+    assert waits == [1] * 5
+    assert harness.rechecks == []
+    assert harness.deletes == []
     assert harness.audit.events == []
     assert harness.events.entries == []
 
@@ -407,6 +451,49 @@ def test_unexpected_exception_is_audited_then_raised(make_harness):
     assert [(e["resource_id"], e["event"]) for e in harness.audit.events] == [("snap-1", "FAILED")]
     assert harness.audit.events[0]["detail"]["reason"] == "exception"
     assert harness.deletes == ["snap-1"]
+
+
+def test_failed_audit_write_after_delete_is_logged_then_raised(make_harness, caplog):
+    harness = make_harness([candidate("snap-1"), candidate("snap-2")])
+    harness.fake_aws()
+    harness.audit.error = RuntimeError("audit table unavailable")
+
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError, match="audit table unavailable"):
+        handler_module.handler(event(), FakeContext())
+
+    assert harness.deletes == ["snap-1"]
+    assert harness.events.entries == []
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(errors) == 1
+    error = errors[0]
+    assert error.name == "executor"
+    assert (error.outcome, error.kind, error.resourceId, error.reason) == (
+        "DELETED",
+        "ebs-snapshot",
+        "snap-1",
+        "planned snap-1",
+    )
+    assert error.runId == RUN_ID
+    assert (
+        error.getMessage() == "audit record failed for DELETED ebs-snapshot snap-1 (planned snap-1)"
+    )
+
+
+def test_failed_event_write_after_delete_is_logged_then_raised(make_harness, caplog):
+    harness = make_harness([candidate("snap-1")])
+    harness.fake_aws()
+
+    def broken_put_events(Entries):
+        raise RuntimeError("bus unavailable")
+
+    harness.events.put_events = broken_put_events
+
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError, match="bus unavailable"):
+        handler_module.handler(event(), FakeContext())
+
+    assert [e["event"] for e in harness.audit.events] == ["DELETED"]
+    errors = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert [(r.outcome, r.resourceId) for r in errors] == [("DELETED", "snap-1")]
 
 
 def test_time_budget_skips_the_rest(make_harness):

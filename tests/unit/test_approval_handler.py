@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 import pytest
+from botocore.exceptions import ReadTimeoutError
 from botocore.stub import Stubber
 
 from approval import handler as approval
@@ -490,7 +491,8 @@ def test_post_task_timed_out_marks_expired_and_410(deps):
 
 
 @pytest.mark.parametrize("code", ["InvalidToken", "TaskDoesNotExist", "ThrottlingException"])
-def test_post_other_states_error_reverts_and_500(deps, code):
+def test_post_refused_callback_reverts_and_500(deps, caplog, code):
+    """A ``ClientError`` other than ``TaskTimedOut`` means not delivered, so the claim reverts."""
     ddb, sfn = deps
     stub_get(ddb, record_item())
     ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
@@ -502,10 +504,65 @@ def test_post_other_states_error_reverts_and_500(deps, code):
     )
     ddb.add_response("update_item", {}, revert_params())
 
-    response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form("reject")))
+    with caplog.at_level(logging.INFO, logger="approval"):
+        response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form("reject")))
 
     assert response["statusCode"] == 500
     html_body(response)
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert [r.getMessage() for r in errors] == [
+        f"decision callback failed (code={code}), claim reverted"
+    ]
+
+
+def test_post_callback_timeout_leaves_claim_deciding_and_500(deps, monkeypatch, caplog):
+    """A ``BotoCoreError`` may hide a delivered callback, so the record stays DECIDING."""
+    ddb, sfn = deps
+    stub_get(ddb, record_item())
+    ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
+    calls = []
+
+    def timed_out(**params):
+        calls.append(params)
+        raise ReadTimeoutError(endpoint_url="https://states.us-east-1.amazonaws.com/")
+
+    # The Stubber cannot raise a BotoCoreError, so the one callback is replaced directly;
+    # any revert, expire or finalize would be an unexpected update_item on the ddb Stubber.
+    monkeypatch.setattr(sfn.client, "send_task_success", timed_out)
+
+    with caplog.at_level(logging.INFO, logger="approval"):
+        response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 500
+    assert calls == [success_params(LINK_APPROVER)]
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert [r.getMessage() for r in errors] == [
+        "decision callback outcome unknown (ReadTimeoutError), approval left DECIDING"
+    ]
+
+
+def test_post_finalize_store_error_after_delivered_decision_is_still_200(deps, caplog):
+    ddb, sfn = deps
+    stub_get(ddb, record_item())
+    ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
+    sfn.add_response("send_task_success", {}, success_params(LINK_APPROVER))
+    ddb.add_client_error(
+        "update_item",
+        service_error_code="ProvisionedThroughputExceededException",
+        http_status_code=400,
+        expected_params=finalize_params("APPROVED"),
+    )
+
+    with caplog.at_level(logging.INFO, logger="approval"):
+        response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 200
+    assert "Plan approved" in html_body(response)
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert [r.getMessage() for r in errors] == [
+        "decision delivered but the approval was not finalized "
+        "(code=ProvisionedThroughputExceededException)"
+    ]
 
 
 def test_post_finalize_conflict_after_delivered_decision_is_still_200(deps):
@@ -770,6 +827,48 @@ def test_logs_never_contain_the_approval_id(deps, caplog):
         assert "confirm=" not in dumped
     for record in approval_records:
         assert record.approvalIdHash == short_hash(APPROVAL_ID)
+
+
+def test_unexpected_failure_logs_no_traceback_and_no_secret(deps, monkeypatch, caplog):
+    """A chained store error whose message echoes the id and token never reaches the logs."""
+    ddb, _ = deps
+    stub_get(ddb, record_item())
+    ddb.add_client_error(
+        "update_item",
+        service_error_code="ConditionalCheckFailedException",
+        service_message=f"condition failed for {APPROVAL_ID} with {TASK_TOKEN}",
+        http_status_code=400,
+        expected_params=finalize_params("APPROVED"),
+    )
+
+    def failing_decide(store, states, found, request, log):
+        # The real store raises AlreadyDecidedError chained from the ClientError above.
+        store.finalize(request.approval_id, "APPROVED", request.now)
+        raise AssertionError("finalize should have raised")
+
+    monkeypatch.setattr(approval, "decide", failing_decide)
+
+    with caplog.at_level(logging.DEBUG):
+        response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 500
+    assert APPROVAL_ID not in html_body(response)
+    failures = [r for r in caplog.records if r.getMessage().startswith("approval request failed")]
+    assert len(failures) == 1
+    assert failures[0].levelno == logging.ERROR
+    assert not failures[0].exc_info
+    assert failures[0].getMessage() == (
+        f"approval request failed (AlreadyDecidedError: {short_hash(APPROVAL_ID)})"
+    )
+    formatter = logging.Formatter()
+    for record in caplog.records:
+        dumped = repr(record.__dict__) + record.getMessage() + (record.exc_text or "")
+        if record.exc_info:
+            dumped += formatter.formatException(record.exc_info)
+        assert APPROVAL_ID not in dumped
+        assert TASK_TOKEN not in dumped
+    assert APPROVAL_ID not in caplog.text
+    assert TASK_TOKEN not in caplog.text
 
 
 # allowed_principal

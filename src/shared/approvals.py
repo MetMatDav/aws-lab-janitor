@@ -33,7 +33,7 @@ _CONDITIONAL_FAILURE = "ConditionalCheckFailedException"
 
 
 class ApprovalError(Exception):
-    """Base class of approval store failures."""
+    """Base class of approval store failures; the message carries ``short_hash``, never the id."""
 
 
 class ApprovalExistsError(ApprovalError):
@@ -126,7 +126,7 @@ class ApprovalStore:
         except ClientError as error:
             if not _is_conditional_failure(error):
                 raise
-            raise ApprovalExistsError(record.approval_id) from error
+            raise ApprovalExistsError(short_hash(record.approval_id)) from error
 
     def get(self, approval_id: str) -> tuple[ApprovalRecord, str] | None:
         """The record and its task token, or ``None`` if there is no such approval."""
@@ -156,7 +156,7 @@ class ApprovalStore:
         except ClientError as error:
             if not _is_conditional_failure(error):
                 raise
-            raise AlreadyDecidedError(approval_id) from error
+            raise AlreadyDecidedError(short_hash(approval_id)) from error
 
     def claim(self, approval_id: str, now: str, approver: dict) -> str:
         """Move a PENDING, unexpired approval to DECIDING for ``approver``.
@@ -181,8 +181,8 @@ class ApprovalStore:
                 raise
             old = error.response.get("Item")
             if old is not None and deserialize(old).get("status") != PENDING:
-                raise AlreadyDecidedError(approval_id) from error
-            raise ExpiredError(approval_id) from error
+                raise AlreadyDecidedError(short_hash(approval_id)) from error
+            raise ExpiredError(short_hash(approval_id)) from error
         return DECIDING
 
     def revert(self, approval_id: str) -> None:
@@ -220,7 +220,7 @@ class ApprovalStore:
         except ClientError as error:
             if not _is_conditional_failure(error):
                 raise
-            raise AlreadyDecidedError(approval_id) from error
+            raise AlreadyDecidedError(short_hash(approval_id)) from error
 
     def expire(self, approval_id: str, decided_at: str) -> None:
         """Mark a PENDING or DECIDING approval EXPIRED; an already decided one is left alone."""

@@ -6,8 +6,12 @@ confirmation, so a refused request never writes.
 1. ``claim``: PENDING -> DECIDING (conditional), so two decisions cannot both win.
 2. Resume Step Functions with the task token: ``SendTaskSuccess`` on approve,
    ``SendTaskFailure`` (error ``Rejected``) on reject. ``TaskTimedOut`` marks the
-   approval EXPIRED; any other failure reverts the claim so the human can retry.
-3. ``finalize``: DECIDING -> APPROVED / REJECTED.
+   approval EXPIRED; any other ``ClientError`` (the request was refused, so not
+   delivered) reverts the claim so the human can retry. A ``BotoCoreError`` (such
+   as a read timeout) leaves the claim DECIDING: the callback may have been
+   delivered, so reverting could let a second decision race the first.
+3. ``finalize``: DECIDING -> APPROVED / REJECTED. Once the callback was
+   delivered the decision stands, so a failed finalize is logged, not returned.
 """
 
 import json
@@ -72,15 +76,18 @@ def decide(
     except ExpiredError:
         log.info("approval expired, decision refused")
         return 410
+    # Only error codes and class names are logged: Step Functions messages can echo the token.
     try:
         _resume(states, token, request)
-    except (ClientError, BotoCoreError) as error:
-        # Only the error code is logged: Step Functions error messages can echo the token.
-        code = (
-            error.response.get("Error", {}).get("Code")
-            if isinstance(error, ClientError)
-            else type(error).__name__
+    except BotoCoreError as error:
+        # The request may have reached Step Functions, so the claim stays DECIDING.
+        log.error(
+            "decision callback outcome unknown (%s), approval left DECIDING",
+            type(error).__name__,
         )
+        return 500
+    except ClientError as error:
+        code = error.response.get("Error", {}).get("Code")
         if code == TASK_TIMED_OUT:
             store.expire(approval_id, now)
             log.warning("task timed out before the decision, approval expired")
@@ -94,5 +101,10 @@ def decide(
     except AlreadyDecidedError:
         # The callback was accepted, so the decision stands; only the record is behind.
         log.error("decision delivered but the approval was no longer DECIDING")
+    except ClientError as error:
+        log.error(
+            "decision delivered but the approval was not finalized (code=%s)",
+            error.response.get("Error", {}).get("Code"),
+        )
     log.info("approval decided (status=%s, mode=%s)", status, request.approver["mode"])
     return 200

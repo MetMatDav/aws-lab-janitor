@@ -13,6 +13,8 @@ False and the approval decision is ``approved``.
 import json
 import logging
 import os
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -20,7 +22,7 @@ from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 from executor import deleters, verify
-from shared.approvals import APPROVED, ApprovalStore
+from shared.approvals import APPROVED, DECIDING, ApprovalStore
 from shared.audit import AuditClient
 from shared.aws_clients import ClientFactory
 from shared.plan_store import PlanIntegrityError, PlanStore
@@ -34,6 +36,10 @@ DETAIL_TYPE = "janitor.resource.{outcome}"
 EVENT_BUS_NAME = "default"
 MAX_RESULT_ITEMS = 200
 DELETABLE_KINDS = ("ebs-snapshot", "ebs-volume", "elastic-ip", "cw-dashboard", "internet-monitor")
+# The approval endpoint finalizes DECIDING -> APPROVED only after Step Functions accepted
+# the callback, so the executor can start while the record is still DECIDING (ruling R11).
+DECIDING_RETRIES = 5
+DECIDING_WAIT_SECONDS = 1
 
 DELETED = "DELETED"
 FAILED = "FAILED"
@@ -61,6 +67,27 @@ def required_seconds(kind: str) -> int:
     if kind == "internet-monitor":
         return RESERVE_SECONDS + deleters.MONITOR_WAIT_SECONDS
     return RESERVE_SECONDS
+
+
+def read_approval(
+    approvals: ApprovalStore,
+    approval_id: str,
+    sleep: Callable[[float], None],
+    log: logging.LoggerAdapter,
+):
+    """The approval record and token, re-read up to ``DECIDING_RETRIES`` times while DECIDING.
+
+    ``ApprovalStore.get`` reads with ``ConsistentRead``. Any other status is returned at
+    once; a record still DECIDING after the last re-read fails ``check_integrity``.
+    """
+    found = approvals.get(approval_id)
+    for _ in range(DECIDING_RETRIES):
+        if found is None or found[0].status != DECIDING:
+            break
+        log.info("approval still DECIDING, re-reading in %ss", DECIDING_WAIT_SECONDS)
+        sleep(DECIDING_WAIT_SECONDS)
+        found = approvals.get(approval_id)
+    return found
 
 
 def check_integrity(detect: dict, approval_id: str, plan_sha: str, found) -> None:
@@ -139,7 +166,32 @@ class _Run:
         return DELETED, item["reason"]
 
     def record(self, item: dict, outcome: str, reason: str, now: datetime) -> None:
-        """Write the audit record of ``item`` and emit the same record as an event."""
+        """Write the audit record of ``item`` and emit the same record as an event.
+
+        If either write fails, an ERROR line names the item and its outcome (so a
+        delete is never left without a trace), then the exception propagates.
+        """
+        try:
+            self._write(item, outcome, reason, now)
+        except Exception:
+            fields = {
+                "outcome": outcome,
+                "kind": item["kind"],
+                "resourceId": item["resourceId"],
+                "reason": reason,
+            }
+            # LoggerAdapter drops call-site ``extra``, so the logger is called directly.
+            self.log.logger.error(
+                "audit record failed for %s %s %s (%s)",
+                outcome,
+                item["kind"],
+                item["resourceId"],
+                reason,
+                extra={**self.log.extra, **fields},
+            )
+            raise
+
+    def _write(self, item: dict, outcome: str, reason: str, now: datetime) -> None:
         detail = {
             "reason": reason,
             "approvalId": self.approval_id,
@@ -183,7 +235,7 @@ class _Run:
         self.log.info("%s %s %s: %s", outcome, item["kind"], item["resourceId"], reason)
 
 
-def handler(event: dict, context) -> dict:
+def handler(event: dict, context, sleep: Callable[[float], None] = time.sleep) -> dict:
     """Lambda entry point: verify integrity, apply each plan item, return per-item outcomes."""
     settings = load_settings(event, os.environ)
     detect = event["detect"]
@@ -195,7 +247,9 @@ def handler(event: dict, context) -> dict:
 
     clients, store, approvals, audit, events = build_dependencies(settings)
     plan, plan_sha = store.get_plan(run_id, detect["planVersionId"])
-    check_integrity(detect, approval_id, plan_sha, approvals.get(approval_id))
+    check_integrity(
+        detect, approval_id, plan_sha, read_approval(approvals, approval_id, sleep, log)
+    )
     log.info("executor run started (armed=%s)", armed)
 
     run = _Run(

@@ -63,9 +63,9 @@ on standard accounts), so with a quota of 10 no reservation is possible and the
 deploy fails. Check yours in Service Quotas (AWS Lambda).
 
 Until then, deploy with `-c reservedConcurrency=false`. Request a Service Quotas
-increase of "Concurrent executions" to at least 101 (100 unreserved plus the
-detector's 1), then redeploy without the flag so the detector gets its
-reservation.
+increase of "Concurrent executions" to at least 102 (100 unreserved plus 1
+each for the detector and the executor), then redeploy without the flag so both
+get their reservation.
 
 ## Deploy in dry-run
 
@@ -80,6 +80,12 @@ npx cdk deploy LabJanitorStack --require-approval broadening \
 
 Omit `-c reservedConcurrency=false` when your account quota allows reserved
 concurrency; it is a safety nicety, not a requirement in this slice.
+
+With the flag, the executor also loses its reserved concurrency of 1, so a
+retried `Apply` could run two executors on the same plan. Both re-verify every
+item and the audit writes are conditional, so nothing is deleted twice or
+outside the plan, but the counts in the result email could overlap. Remove the
+flag after the quota increase in Plan 3.
 
 Deploy with the default CDK bootstrap roles. Do not pass `cdk deploy
 --role-arn <other role>`: the approvals topic policy allows `sns:Subscribe` and
@@ -121,7 +127,9 @@ After the deploy:
    subject `AWS Notification - Subscription Confirmation`; look in spam. The
    link expires after three days. To send it again, open the subscription in
    the SNS console and choose **Request confirmation**, or call `aws sns
-   subscribe` again with the same topic, protocol and endpoint.
+   subscribe` again with the same topic, protocol and endpoint (reports and
+   alerts topics only; for the approvals topic see
+   [Things you will see on first deploy](#things-you-will-see-on-first-deploy)).
 2. `dryRun` defaults to `true`, so the stack only reports.
 3. Note the four stack outputs: `StateMachineArn`, `PlansBucketName`,
    `AuditTableName` and `ApprovalApiUrl` (the base URL of the approval API,
@@ -201,6 +209,10 @@ inventory.
   next to the reports and alerts ones. Until you confirm it, approval requests
   are dropped silently, like any report to a pending subscription. The new
   `ApprovalApiUrl` output is the base URL of the approval API.
+  Resending the confirmation with `aws sns subscribe` does not work for the
+  approvals topic: its policy denies `sns:Subscribe` to every principal except
+  the CDK CloudFormation execution role and the account root. If the 3-day
+  link lapses, redeploy the stack or use a root session.
 - A run that is waiting for approval shows as `RUNNING` in Step Functions for
   up to 72 hours. The state machine execution timeout is 74 hours (the 72 hour
   approval window plus 2 hours for the rest of the run).
@@ -255,7 +267,7 @@ JSON):
 | `403` | IAM route only: the caller is not the configured approver. |
 | `404` | No such approval, or the route is not enabled by `approvalAuth`. |
 | `409` | Already decided. A second decision never changes the first. |
-| `410` | The approval expired (after 72 hours). Nothing will be deleted for this run. |
+| `410` | The approval expired (after the approval window: 71 h 30 min; the state machine waits 72 h). Nothing will be deleted for this run. |
 
 To follow one approval in the audit table (`AuditTableName`):
 
