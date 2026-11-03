@@ -335,3 +335,41 @@ def test_expire_swallows_conditional_failure(ddb_stub):
     store(ddb_stub).expire(APPROVAL_ID, NOW)
 
     ddb_stub.assert_no_pending_responses()
+
+
+def refresh_token_params() -> dict:
+    return {
+        "TableName": TABLE,
+        "Key": KEY,
+        "UpdateExpression": "SET taskToken = :t",
+        "ConditionExpression": "#s = :pending",
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {":t": {"S": "new-token"}, ":pending": {"S": "PENDING"}},
+    }
+
+
+def test_refresh_token_replaces_the_token_of_a_pending_approval(ddb_stub):
+    ddb_stub.add_response("update_item", {}, refresh_token_params())
+
+    store(ddb_stub).refresh_token(APPROVAL_ID, "new-token")
+
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_refresh_token_raises_already_decided_on_conditional_failure(ddb_stub):
+    conditional_failure(ddb_stub, refresh_token_params())
+
+    with pytest.raises(AlreadyDecidedError):
+        store(ddb_stub).refresh_token(APPROVAL_ID, "new-token")
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_refresh_token_propagates_other_errors(ddb_stub):
+    ddb_stub.add_client_error(
+        "update_item",
+        service_error_code="ProvisionedThroughputExceededException",
+        expected_params=refresh_token_params(),
+    )
+
+    with pytest.raises(ClientError):
+        store(ddb_stub).refresh_token(APPROVAL_ID, "new-token")

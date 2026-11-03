@@ -1,4 +1,5 @@
 import io
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -312,3 +313,41 @@ def test_unknown_auth_mode_raises():
 
     with pytest.raises(ValueError, match="unknown approval auth mode"):
         approval.approval_message(record, record.plan_summary, APPROVAL_URL, "oauth", "abc1")
+
+
+def test_request_approval_retry_refreshes_the_token_and_republishes(stubs, caplog):
+    s3, sns, ddb = stubs
+    expect_plan_read(s3)
+    ddb.add_client_error(
+        "put_item",
+        service_error_code="ConditionalCheckFailedException",
+        service_message="The conditional request failed",
+        http_status_code=400,
+        expected_params={
+            "TableName": TABLE,
+            "Item": expected_item(expected_record()),
+            "ConditionExpression": "attribute_not_exists(pk) AND attribute_not_exists(sk)",
+        },
+    )
+    ddb.add_response(
+        "update_item",
+        {},
+        {
+            "TableName": TABLE,
+            "Key": serialize({"pk": f"APPROVAL#{APPROVAL_ID}", "sk": "META"}),
+            "UpdateExpression": "SET taskToken = :t",
+            "ConditionExpression": "#s = :pending",
+            "ExpressionAttributeNames": {"#s": "status"},
+            "ExpressionAttributeValues": serialize({":t": TASK_TOKEN, ":pending": "PENDING"}),
+        },
+    )
+    expect_approvals_publish(sns, SUBJECT, message_with(link_block()))
+    expect_report(s3, sns)
+
+    with caplog.at_level(logging.INFO, logger="notifier"):
+        result = approval.request_approval(approval_event(), now=NOW)
+
+    assert result["approvalId"] == APPROVAL_ID
+    assert "existing approval request refreshed" in caplog.text
+    assert APPROVAL_ID not in caplog.text
+    assert TASK_TOKEN not in caplog.text

@@ -133,6 +133,25 @@ class ApprovalStore:
         item = deserialize(raw)
         return ApprovalRecord.from_item(item), item["taskToken"]
 
+    def refresh_token(self, approval_id: str, task_token: str) -> None:
+        """Replace the task token of a PENDING approval (a retried task attempt has a new one).
+
+        Raises ``AlreadyDecidedError`` if the approval already left PENDING.
+        """
+        try:
+            self._ddb.update_item(
+                TableName=self._table,
+                Key=self._key(approval_id),
+                UpdateExpression="SET taskToken = :t",
+                ConditionExpression="#s = :pending",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues=serialize({":t": task_token, ":pending": PENDING}),
+            )
+        except ClientError as error:
+            if not _is_conditional_failure(error):
+                raise
+            raise AlreadyDecidedError(approval_id) from error
+
     def claim(self, approval_id: str, now: str, approver: dict) -> str:
         """Move a PENDING, unexpired approval to DECIDING for ``approver``.
 

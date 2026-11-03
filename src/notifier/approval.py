@@ -1,12 +1,13 @@
 """``approval`` mode: record a pending approval and email the owner how to decide."""
 
+import hashlib
 import logging
 import os
 from datetime import UTC, datetime
 
 from notifier import report
 from notifier.report import fit_subject
-from shared.approvals import PENDING, ApprovalRecord, expiry_for
+from shared.approvals import PENDING, ApprovalExistsError, ApprovalRecord, expiry_for
 from shared.plan_store import plan_key
 from shared.plan_summary import render_summary, summarize_plan
 
@@ -19,6 +20,11 @@ CONFIRMATION_LENGTH = 4
 
 class PlanIntegrityError(Exception):
     """The plan in S3 is not the one the detector hashed."""
+
+
+def _short_hash(value: str) -> str:
+    """Stable short fingerprint for logs: the approval id grants access, so it is never logged."""
+    return hashlib.sha256(value.encode()).hexdigest()[:12]
 
 
 def approval_subject(summary: dict) -> str:
@@ -103,7 +109,14 @@ def request_approval(event: dict, now: datetime | None = None) -> dict:
         approved_by=None,
         decided_at=None,
     )
-    approvals.create(record, event["taskToken"])
+    try:
+        approvals.create(record, event["taskToken"])
+    except ApprovalExistsError:
+        # A retried task attempt carries a new task token; the stored one would be stale.
+        approvals.refresh_token(record.approval_id, event["taskToken"])
+        log.info(
+            "existing approval request refreshed (approval=%s)", _short_hash(record.approval_id)
+        )
 
     message = approval_message(
         record,
@@ -118,8 +131,8 @@ def request_approval(event: dict, now: datetime | None = None) -> dict:
         Message=message,
     )
     log.info(
-        "approval requested (approvalId=%s, messageId=%s)",
-        record.approval_id,
+        "approval requested (approval=%s, messageId=%s)",
+        _short_hash(record.approval_id),
         response["MessageId"],
     )
     report.publish_report(event)
