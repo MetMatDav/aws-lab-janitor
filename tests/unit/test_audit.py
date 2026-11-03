@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from botocore.exceptions import ClientError
@@ -265,4 +265,80 @@ def test_was_proposed_live_is_false_when_all_pages_are_exhausted(ddb_stub):
     )
 
     assert audit(ddb_stub).was_proposed_live("i-0abc") is False
+    ddb_stub.assert_no_pending_responses()
+
+
+def eligible_query_params(resource_id: str, before: str, start_key: dict | None = None) -> dict:
+    params = {
+        "TableName": TABLE,
+        "IndexName": "by-resource",
+        "KeyConditionExpression": "resourceId = :id AND #at < :before",
+        "FilterExpression": "#e = :e AND dryRun = :f",
+        "ExpressionAttributeNames": {"#at": "at", "#e": "event"},
+        "ExpressionAttributeValues": {
+            ":id": {"S": resource_id},
+            ":before": {"S": before},
+            ":e": {"S": "ELIGIBLE"},
+            ":f": {"BOOL": False},
+        },
+    }
+    if start_key is not None:
+        params["ExclusiveStartKey"] = start_key
+    return params
+
+
+def test_put_run_summary_takes_an_actor(ddb_stub):
+    item = {
+        "pk": {"S": f"RUN#{RUN_ID}"},
+        "sk": {"S": "RUN#SUMMARY"},
+        "event": {"S": "SUMMARY"},
+        "at": {"S": "2026-11-02T12:00:05+00:00"},
+        "actor": {"S": "lambda:executor"},
+        "detail": {"M": {"deleted": {"N": "1"}}},
+    }
+    ddb_stub.add_response("put_item", {}, put_params(item))
+
+    audit(ddb_stub).put_run_summary(RUN_ID, {"deleted": 1}, AT, actor="lambda:executor")
+
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_was_eligible_live_before_queries_by_resource_and_time(ddb_stub):
+    ddb_stub.add_response(
+        "query",
+        {"Items": [{"pk": {"S": "RUN#x"}}], "Count": 1},
+        eligible_query_params("eipalloc-1", "2026-10-26T12:00:05+00:00"),
+    )
+
+    assert audit(ddb_stub).was_eligible_live_before("eipalloc-1", AT - timedelta(days=7)) is True
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_was_eligible_live_before_is_false_when_pages_are_exhausted(ddb_stub):
+    end = {"pk": {"S": "RUN#a"}, "sk": {"S": "x"}, "resourceId": {"S": "eipalloc-1"}}
+    before = "2026-10-26T12:00:05+00:00"
+    ddb_stub.add_response(
+        "query",
+        {"Items": [], "Count": 0, "ScannedCount": 5, "LastEvaluatedKey": end},
+        eligible_query_params("eipalloc-1", before),
+    )
+    ddb_stub.add_response(
+        "query",
+        {"Items": [], "Count": 0, "ScannedCount": 2},
+        eligible_query_params("eipalloc-1", before, end),
+    )
+
+    assert audit(ddb_stub).was_eligible_live_before("eipalloc-1", AT - timedelta(days=7)) is False
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_was_eligible_live_before_normalizes_the_cutoff_to_utc(ddb_stub):
+    local = datetime(2026, 10, 26, 7, 0, 5, tzinfo=timezone(timedelta(hours=-5)))
+    ddb_stub.add_response(
+        "query",
+        {"Items": [], "Count": 0},
+        eligible_query_params("eipalloc-1", "2026-10-26T12:00:05+00:00"),
+    )
+
+    assert audit(ddb_stub).was_eligible_live_before("eipalloc-1", local) is False
     ddb_stub.assert_no_pending_responses()

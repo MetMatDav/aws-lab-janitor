@@ -7,10 +7,10 @@ and ignored.
 
 import logging
 from datetime import UTC, datetime
-from decimal import Decimal
 
-from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
+
+from shared.dynamo import serialize
 
 logger = logging.getLogger("shared.audit")
 
@@ -19,30 +19,13 @@ RESOURCE_INDEX = "by-resource"
 SUMMARY_SK = "RUN#SUMMARY"
 SUMMARY_ACTOR = "lambda:detector"
 
-_serializer = TypeSerializer()
-
-
-def _clean(value):
-    """Make ``value`` serializable: floats become ``Decimal``, ``None`` map values are dropped."""
-    if isinstance(value, float):
-        return Decimal(str(value))
-    if isinstance(value, dict):
-        return {k: _clean(v) for k, v in value.items() if v is not None}
-    if isinstance(value, (list, tuple)):
-        return [_clean(v) for v in value]
-    return value
-
-
-def _serialize(item: dict) -> dict:
-    return {k: _serializer.serialize(v) for k, v in _clean(item).items()}
-
 
 def _iso(at: datetime) -> str:
     return at.astimezone(UTC).isoformat()
 
 
 class AuditClient:
-    """Write run events and summaries; answer whether a resource was proposed live."""
+    """Write run events and summaries; answer whether a resource was proposed or eligible live."""
 
     def __init__(self, ddb_client, table_name: str) -> None:
         self._ddb = ddb_client
@@ -81,7 +64,9 @@ class AuditClient:
             }
         )
 
-    def put_run_summary(self, run_id: str, summary: dict, at: datetime) -> None:
+    def put_run_summary(
+        self, run_id: str, summary: dict, at: datetime, actor: str = SUMMARY_ACTOR
+    ) -> None:
         """Record the summary of run ``run_id``."""
         self._put_new(
             {
@@ -89,7 +74,7 @@ class AuditClient:
                 "sk": SUMMARY_SK,
                 "event": "SUMMARY",
                 "at": _iso(at),
-                "actor": SUMMARY_ACTOR,
+                "actor": actor,
                 "detail": summary,
             }
         )
@@ -108,6 +93,27 @@ class AuditClient:
                 ":f": {"BOOL": False},
             },
         }
+        return self._any_match(params)
+
+    def was_eligible_live_before(self, resource_id: str, before: datetime) -> bool:
+        """True if a non-dry-run plan marked ``resource_id`` ELIGIBLE earlier than ``before``."""
+        params = {
+            "TableName": self._table,
+            "IndexName": RESOURCE_INDEX,
+            "KeyConditionExpression": "resourceId = :id AND #at < :before",
+            "FilterExpression": "#e = :e AND dryRun = :f",
+            "ExpressionAttributeNames": {"#at": "at", "#e": "event"},
+            "ExpressionAttributeValues": {
+                ":id": {"S": resource_id},
+                ":before": {"S": _iso(before)},
+                ":e": {"S": "ELIGIBLE"},
+                ":f": {"BOOL": False},
+            },
+        }
+        return self._any_match(params)
+
+    def _any_match(self, params: dict) -> bool:
+        """Run the query ``params`` page by page; True as soon as a page has an item."""
         while True:
             page = self._ddb.query(**params)
             if page.get("Count", 0) > 0 or page.get("Items"):
@@ -121,7 +127,7 @@ class AuditClient:
         try:
             self._ddb.put_item(
                 TableName=self._table,
-                Item=_serialize(item),
+                Item=serialize(item),
                 ConditionExpression=NEW_RECORD_CONDITION,
             )
         except ClientError as error:
