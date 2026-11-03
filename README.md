@@ -34,9 +34,11 @@ export AWS_PROFILE=<your-admin-profile> AWS_REGION=us-east-1 \
        CDK_DEFAULT_ACCOUNT=<account-id> CDK_DEFAULT_REGION=us-east-1 \
        PATH="$PWD/.venv/bin:$PATH"
 npx cdk diff -c reportEmail=you@example.com -c alertEmail=you@example.com
-npx cdk deploy LabJanitorStack --require-approval never \
+npx cdk deploy LabJanitorStack --require-approval broadening \
   -c reportEmail=you@example.com -c alertEmail=you@example.com
 ```
 
 Add `-c reservedConcurrency=false` in accounts with a small Lambda concurrency quota.
+`--require-approval broadening` lets a human review IAM changes on the first deploy;
+use `--require-approval never` only in non-interactive pipelines.
 `dryRun` defaults to true, so the stack only reports.

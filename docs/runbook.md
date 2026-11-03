@@ -33,7 +33,7 @@ Check what CloudTrail already records before deploying, because Plan 3 adds
 CloudTrail data events for the plans bucket and must not create a second trail
 that duplicates management events.
 
-Example, facts recorded on 2026-11-02 for the owner's account:
+Example, facts recorded on 2026-11-03 (UTC) for the owner's account:
 
 - An AWS Organizations trail created by Control Tower
   (`aws-controltower-BaselineCloudTrail`) already covers the account. It is
@@ -55,13 +55,15 @@ python -c "import boto3; c = boto3.client('cloudtrail', region_name='us-east-1')
 ## Account quotas
 
 On the owner's account the Lambda account concurrency quota ("Concurrent
-executions") was 10, with 10 unreserved. That is below the 100 that reserving
-concurrency requires, so Lambda refuses the reservation and the deploy fails.
-Check yours in Service Quotas (AWS Lambda).
+executions") was 10, with 10 unreserved. Lambda rejects a reservation that
+would leave the account with fewer than its minimum unreserved concurrency (100
+on standard accounts), so with a quota of 10 no reservation is possible and the
+deploy fails. Check yours in Service Quotas (AWS Lambda).
 
-Until Service Quotas raises "Concurrent executions" to at least 100, deploy
-with `-c reservedConcurrency=false`. After the increase, redeploy without the
-flag so the detector gets its reservation.
+Until then, deploy with `-c reservedConcurrency=false`. Request a Service Quotas
+increase of "Concurrent executions" to at least 101 (100 unreserved plus the
+detector's 1), then redeploy without the flag so the detector gets its
+reservation.
 
 ## Deploy in dry-run
 
@@ -70,9 +72,16 @@ export AWS_PROFILE=<your-admin-profile> AWS_REGION=us-east-1 \
        CDK_DEFAULT_ACCOUNT=<account-id> CDK_DEFAULT_REGION=us-east-1 \
        PATH="$PWD/.venv/bin:$PATH"
 npx cdk diff -c reportEmail=you@example.com -c alertEmail=you@example.com -c reservedConcurrency=false
-npx cdk deploy LabJanitorStack --require-approval never \
+npx cdk deploy LabJanitorStack --require-approval broadening \
   -c reportEmail=you@example.com -c alertEmail=you@example.com -c reservedConcurrency=false
 ```
+
+Omit `-c reservedConcurrency=false` when your account quota allows reserved
+concurrency; it is a safety nicety, not a requirement in this slice.
+
+`--require-approval broadening` makes the CDK stop and ask before applying IAM
+or security-group broadening, so a human reviews those changes on the first
+deploy. Use `--require-approval never` only in non-interactive pipelines.
 
 After the deploy:
 
@@ -98,6 +107,10 @@ Functions console (Start execution) or with boto3:
 ```
 python -c "import boto3; print(boto3.client('stepfunctions', region_name='us-east-1').start_execution(stateMachineArn='<StateMachineArn>', input='{\"dryRun\": true, \"minAgeDays\": 7}')['executionArn'])"
 ```
+
+The boto3 snippets in this section and the local detector run below need the
+project venv (`PATH="$PWD/.venv/bin:$PATH"` or an activated venv) and
+`AWS_REGION=us-east-1`, set in the same shell as the Deploy section.
 
 Wait for the execution to reach `SUCCEEDED`, then check:
 
@@ -166,7 +179,7 @@ janitor's own resources is planned.
 To pause the weekly run, redeploy with the schedule disabled:
 
 ```
-npx cdk deploy LabJanitorStack --require-approval never \
+npx cdk deploy LabJanitorStack --require-approval broadening \
   -c reportEmail=you@example.com -c alertEmail=you@example.com \
   -c reservedConcurrency=false -c janitorEnabled=false
 ```
@@ -177,7 +190,7 @@ To resume, redeploy without `-c janitorEnabled=false` (it defaults to `true`).
 
 ### Deploy fails with "SSM parameter /cdk-bootstrap/<qualifier>/version not found"
 
-Seen on the first deployment (2026-11-03). The `CDKToolkit` stack existed
+Seen on the first deployment (2026-11-03 (UTC)). The `CDKToolkit` stack existed
 (default qualifier `hnb659fds`, bootstrap version 32), but the SSM parameter
 had been deleted outside CloudFormation. `cdk bootstrap` did not recreate it
 because the bootstrap template was unchanged, so there was no change set.
@@ -215,8 +228,11 @@ Fix: recreate the parameter with the version CloudFormation expects, then
 deploy again:
 
 ```
-aws ssm put-parameter --name /cdk-bootstrap/hnb659fds/version --type String --value 32
+aws ssm put-parameter --name /cdk-bootstrap/<qualifier>/version --type String \
+  --value <BootstrapVersion-output-of-CDKToolkit>
 ```
+
+In this incident the qualifier was `hnb659fds` and the version was 32.
 
 A later `cdk bootstrap` that changes the template will update the parameter
 normally.
