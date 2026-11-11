@@ -93,10 +93,17 @@ for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=p
 PY
 ```
 
-Each line is one write: the detector's `PutObject` of the plan and report and
-its `PutItem` calls, the notifier's and the state machine's writes to the
-approval record, and the executor's `PutItem` per outcome. The `who` column is
+Each line is one call that named the run: the detector's `PutObject` of the
+plan and report and its `PutItem` calls, the notifier's and the executor's
+`GetObject` of the plan, the executor's `PutItem` per outcome and the state
+machine's mirror item. Reads are logged as well as writes. The `who` column is
 the role session name, which for a Lambda function is the function name.
+
+DynamoDB data events record the key of the item, not its other attributes. The
+calls on the approval record (`pk` `APPROVAL#<approvalId>`) therefore do not
+match a run id; search for the approval id to see who created, claimed and
+closed an approval. It also means the trail's log bucket holds approval ids in
+clear, like the audit table does: keep read access to both equally narrow.
 
 The deletions themselves (`DeleteSnapshot`, `DeleteVolume`, `ReleaseAddress`,
 `DeleteDashboards`, `DeleteMonitor`) are management events. Event history keeps
@@ -135,6 +142,27 @@ npx cdk deploy LabJanitorStack --require-approval broadening \
 
 Omit `-c reservedConcurrency=false` when your account quota allows reserved
 concurrency; it is a safety nicety, not a requirement in this slice.
+
+The CDK does not remember context between deploys: every `cdk deploy` must
+repeat every `-c` flag of the one before, or the omitted settings fall back to
+their defaults. Leaving out `-c createTrail=dataEventsOnly` turns the trail
+into a multi-region trail with management events; leaving out `-c dryRun=false`
+after the cutover disarms the executor. The examples in this runbook show only
+the flags they are about. To stop typing them, put your values in
+`cdk.context.json` next to `cdk.json` (it is git-ignored, so the addresses
+stay out of the repository) and deploy with no `-c` at all:
+
+```
+{
+  "reportEmail": "you@example.com",
+  "alertEmail": "you@example.com",
+  "createTrail": "dataEventsOnly",
+  "reservedConcurrency": "false"
+}
+```
+
+Run `npx cdk diff` before a deploy: a trail, an alarm or the executor's
+`DELETIONS_ENABLED` changing when you did not mean to is a forgotten flag.
 
 With the flag, the executor also loses its reserved concurrency of 1, so a
 retried `Apply` could run two executors on the same plan. Both re-verify every
@@ -188,9 +216,10 @@ After the deploy:
    alerts topics only; for the approvals topic see
    [Things you will see on first deploy](#things-you-will-see-on-first-deploy)).
 2. `dryRun` defaults to `true`, so the stack only reports.
-3. Note the four stack outputs: `StateMachineArn`, `PlansBucketName`,
-   `AuditTableName` and `ApprovalApiUrl` (the base URL of the approval API,
-   `https://<api-id>.execute-api.<region>.amazonaws.com`).
+3. Note the stack outputs: `StateMachineArn`, `PlansBucketName`,
+   `AuditTableName`, `ApprovalApiUrl` (the base URL of the approval API,
+   `https://<api-id>.execute-api.<region>.amazonaws.com`) and, unless
+   `createTrail` is `none`, `TrailLogBucketName`.
 
 ## Manual dry-run
 
@@ -368,10 +397,17 @@ on purpose: a second callback racing an unknown first one would be worse than
 a manual step.
 
 First find out whether the decision arrived. Open the execution in Step
-Functions: if it moved past `RequestApproval`, the decision was delivered and
-the run carries on; the record only lags behind and needs nothing. If
-`RequestApproval` is still running, the callback was lost. Put the record back
-to `PENDING` from an administrator session and decide again from the email:
+Functions and look at `RequestApproval`:
+
+- It ended and the run went on to reject (`RecordRejected`): the decision was
+  delivered and the state machine closed the record itself. Nothing to do.
+- It ended and the run went on to `Apply`: the approval was delivered, but the
+  executor applies only a record that reads `APPROVED`. It waits a few seconds
+  for the record, then fails with `approval is not APPROVED`, the run ends
+  `FAILED` with an alert, and nothing is deleted. Do not edit the record: start
+  a new run and approve its plan.
+- It is still running: the callback was lost. Put the record back to `PENDING`
+  from an administrator session and decide again from the email:
 
 ```
 python -c "import boto3; boto3.client('dynamodb', region_name='us-east-1').update_item(TableName='<AuditTableName>', Key={'pk': {'S': 'APPROVAL#<approvalId>'}, 'sk': {'S': 'META'}}, UpdateExpression='SET #s = :pending REMOVE approvedBy', ConditionExpression='#s = :deciding', ExpressionAttributeNames={'#s': 'status'}, ExpressionAttributeValues={':pending': {'S': 'PENDING'}, ':deciding': {'S': 'DECIDING'}})"
@@ -478,6 +514,14 @@ npx cdk deploy LabJanitorStack --require-approval broadening \
 ```
 
 To resume, redeploy without `-c janitorEnabled=false` (it defaults to `true`).
+Both commands need the rest of your flags too (`createTrail`, `dryRun`; see
+[Deploy in dry-run](#deploy-in-dry-run)).
+
+After resuming, start a manual run and check that the heartbeat alarm is `OK`.
+If the pause lasted more than seven days the alarm is already in `ALARM`, and
+CloudWatch does not notify again for an alarm that was in that state when its
+actions were switched back on: a schedule that failed to resume would tell
+nobody.
 
 ## IAM simulation
 
@@ -517,7 +561,7 @@ itself.
 | `DlqNotEmpty` | The scheduler could not start a run after its retries, or SNS could not deliver an email. The message is in the dead-letter queue. | Read the message (below) to see which. For a failed start, check the state machine and the schedule, then start a run by hand. For a failed email, check the address. Purge the queue when done; the alarm clears. |
 | `ExecutionFailed` | A weekly execution failed or timed out. Most failures also send a `[Lab Janitor] Run failed` email from the `NotifyFailure` state, so expect two emails; a failure before or inside that state sends only this one. | Open the execution in Step Functions and read the failed state. Nothing is deleted by a failed run unless the result email says so. Start a new run once fixed. |
 | `ReminderFailed` | An execution of the reminder state machine failed. The approval itself is unaffected. | Decide the pending approval from the original email. Read the failed execution for the cause. |
-| `Heartbeat` | No execution started in the last 7 days: the schedule is disabled or broken, or the stack is. | Check the schedule state and the last execution. Start a manual dry-run; the alarm clears on the next evaluation. |
+| `Heartbeat` | No execution started in the last 7 days: the schedule is disabled or broken, or the stack is. | Check the schedule state and the last execution. Start a manual dry-run; the alarm recovers within one to two hours (alarms over daily periods are evaluated hourly). |
 | `ReportsUndelivered`, `ApprovalsUndelivered` | A message was published to that topic and reached no subscriber. SNS does not count that as a failure. | Almost always a subscription still `PendingConfirmation`: list them as in [Deploy in dry-run](#deploy-in-dry-run) and confirm. The message itself is gone; the report is in the plans bucket, and an approval request can be read from the approval record. |
 
 Things to know:
@@ -532,6 +576,14 @@ Things to know:
 - The undelivered alarms look at one-hour periods. A publish in the last second
   of an hour whose delivery lands in the next one can raise a false alarm that
   clears an hour later.
+- An undelivered alarm goes back to `OK` by itself about an hour after it
+  fired, when the publish leaves the one-hour window. That recovery email does
+  not mean the subscription was fixed: check it.
+- The alarm is blind for the hour in which a subscription is created: the
+  confirmation email counts as a delivery and cancels out a report published in
+  the same hour. This is what happened on the first run of 2026-11-03 (one
+  publish, one delivery, both in the same hour). So confirm the three
+  subscriptions before the first run; the alarm covers the weeks after.
 - The alarms moved to their own construct in Plan 3, so their names changed
   once on that deploy.
 

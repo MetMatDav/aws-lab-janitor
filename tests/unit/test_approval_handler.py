@@ -606,13 +606,19 @@ def test_finalize_read_timeout_still_returns_200(deps, monkeypatch, caplog):
 
     assert response["statusCode"] == 200
     assert "Plan approved" in html_body(response)
-    assert updates == ["SET #s = :deciding, approvedBy = :by", "SET #s = :status, decidedAt = :at"]
+    assert updates == [
+        "SET #s = :deciding, approvedBy = :by",
+        *["SET #s = :status, decidedAt = :at"] * 3,
+    ]
     errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
-    assert errors == ["decision delivered but the approval was not finalized (ReadTimeoutError)"]
+    assert errors == [
+        "decision delivered but the approval was not finalized after 3 attempts (ReadTimeoutError)"
+    ]
     assert APPROVAL_ID not in caplog.text
 
 
-def test_post_finalize_store_error_after_delivered_decision_is_still_200(deps, caplog):
+def test_finalize_is_retried_until_the_record_reads_approved(deps, caplog):
+    """The executor applies only an APPROVED record, so one failed write must not strand it."""
     ddb, sfn = deps
     stub_get(ddb, record_item())
     ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
@@ -623,6 +629,30 @@ def test_post_finalize_store_error_after_delivered_decision_is_still_200(deps, c
         http_status_code=400,
         expected_params=finalize_params("APPROVED"),
     )
+    ddb.add_response("update_item", {}, finalize_params("APPROVED"))
+
+    with caplog.at_level(logging.INFO, logger="approval"):
+        response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 200
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR] == []
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == [
+        "finalize attempt 1 of 3 failed (code=ProvisionedThroughputExceededException), retrying"
+    ]
+
+
+def test_post_finalize_store_error_after_delivered_decision_is_still_200(deps, caplog):
+    ddb, sfn = deps
+    stub_get(ddb, record_item())
+    ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
+    sfn.add_response("send_task_success", {}, success_params(LINK_APPROVER))
+    for _attempt in range(3):
+        ddb.add_client_error(
+            "update_item",
+            service_error_code="ProvisionedThroughputExceededException",
+            http_status_code=400,
+            expected_params=finalize_params("APPROVED"),
+        )
 
     with caplog.at_level(logging.INFO, logger="approval"):
         response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
@@ -631,7 +661,7 @@ def test_post_finalize_store_error_after_delivered_decision_is_still_200(deps, c
     assert "Plan approved" in html_body(response)
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert [r.getMessage() for r in errors] == [
-        "decision delivered but the approval was not finalized "
+        "decision delivered but the approval was not finalized after 3 attempts "
         "(code=ProvisionedThroughputExceededException)"
     ]
 

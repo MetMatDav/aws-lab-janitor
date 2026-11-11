@@ -11,9 +11,11 @@ confirmation, so a refused request never writes.
    (such as a read timeout) leaves the claim DECIDING and answers 504: the
    callback may have been delivered, so reverting could let a second decision
    race the first, and telling the human "not recorded" could be a lie.
-3. ``finalize``: DECIDING -> APPROVED / REJECTED. Once the callback was
-   delivered the decision stands, so a failed finalize, whatever the error, is
-   logged and not returned.
+3. ``finalize``: DECIDING -> APPROVED / REJECTED, tried up to three times. The
+   callback was delivered, so the answer to the human does not change if the
+   write fails; but the executor applies only a record that reads APPROVED, so
+   an approval whose finalize never lands ends in a failed run with nothing
+   deleted (a rejection is closed by the state machine itself).
 """
 
 import json
@@ -37,6 +39,7 @@ DECISIONS = {"approve": APPROVED, "reject": REJECTED}
 TASK_TIMED_OUT = "TaskTimedOut"
 # HTTP 504: Step Functions did not answer, so nobody knows if the decision arrived.
 UNKNOWN_OUTCOME = 504
+FINALIZE_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,44 @@ def _resume(states: BaseClient, token: str, request: Decision) -> None:
     else:
         cause = {"approvalId": request.approval_id, "rejectedBy": request.approver}
         states.send_task_failure(taskToken=token, error="Rejected", cause=json.dumps(cause))
+
+
+def _finalize(
+    store: ApprovalStore, approval_id: str, status: str, now: str, log: logging.LoggerAdapter
+) -> None:
+    """Record a delivered decision as ``status``, trying up to ``FINALIZE_ATTEMPTS`` times.
+
+    The callback was accepted, so the execution is already moving. The write
+    still matters: the executor refuses to apply unless the record reads
+    APPROVED. If it never lands, the run fails safe (nothing is deleted) and
+    the error is logged; the answer to the human does not change.
+    """
+    for attempt in range(1, FINALIZE_ATTEMPTS + 1):
+        try:
+            store.finalize(approval_id, status, now)
+            return
+        except AlreadyDecidedError:
+            # Someone else closed the record (the state machine, on a rejection or expiry).
+            log.error("decision delivered but the approval was no longer DECIDING")
+            return
+        except (ClientError, BotoCoreError) as error:
+            if isinstance(error, ClientError):
+                cause = f"code={error.response.get('Error', {}).get('Code')}"
+            else:
+                cause = type(error).__name__
+            if attempt < FINALIZE_ATTEMPTS:
+                log.warning(
+                    "finalize attempt %s of %s failed (%s), retrying",
+                    attempt,
+                    FINALIZE_ATTEMPTS,
+                    cause,
+                )
+            else:
+                log.error(
+                    "decision delivered but the approval was not finalized after %s attempts (%s)",
+                    FINALIZE_ATTEMPTS,
+                    cause,
+                )
 
 
 def decide(
@@ -102,19 +143,6 @@ def decide(
         log.error("decision callback failed (code=%s), claim reverted", code)
         return 500
     status = DECISIONS[request.decision]
-    try:
-        store.finalize(approval_id, status, now)
-    except AlreadyDecidedError:
-        # The callback was accepted, so the decision stands; only the record is behind.
-        log.error("decision delivered but the approval was no longer DECIDING")
-    except ClientError as error:
-        log.error(
-            "decision delivered but the approval was not finalized (code=%s)",
-            error.response.get("Error", {}).get("Code"),
-        )
-    except BotoCoreError as error:
-        log.error(
-            "decision delivered but the approval was not finalized (%s)", type(error).__name__
-        )
+    _finalize(store, approval_id, status, now, log)
     log.info("approval decided (status=%s, mode=%s)", status, request.approver["mode"])
     return 200

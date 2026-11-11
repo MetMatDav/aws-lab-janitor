@@ -70,3 +70,36 @@ runbook. What it left open, for Plan 3:
   CloudWatch dashboard calls on an empty `LAB-` dashboard.
 - A decided approval answers `409` to `GET` as well as `POST`; the runbook only
   mentioned the second decision.
+
+## Plan 3 residuals (from the whole-branch review of 2026-11-11)
+
+Fixed in the review's fix pass: finalize is retried three times after a
+delivered decision; the runbook passages on `DECIDING`, on repeating `-c`
+flags, on the undelivered alarm recovering by itself and on what the data
+events contain. Deferred:
+
+- Undelivered alarms: blind in the hour a subscription is created (the
+  confirmation email is a delivery). A five-minute period would shrink the
+  window and raise the odds of a boundary false alarm; decide after Task 8
+  shows whether the alarm flaps on a normal run.
+- Approval handler: if botocore retries the claim `UpdateItem` after a lost
+  response, the retry fails against the handler's own `DECIDING` and the
+  approver gets `409` with no callback sent; the run waits until it expires.
+  Comparing the old item's `approvedBy` with the request would recognize the
+  handler's own claim. Rare, fails safe.
+- `StartReminder` has no `Retry` before its catch-all: a throttled start drops
+  the reminder with no signal but `$.reminderError` in the execution history.
+- `ReminderFailed` counts failed reminder executions, not timed-out ones.
+- A reminder whose publish fails after `remindedAt` was stamped is never sent
+  again (the `ReminderFailed` alarm fires); no test pins that order.
+- CI synthesizes only `createTrail=full`; a matrix over the three modes would
+  keep `dataEventsOnly` and `none` passing cdk-nag.
+- Reminder timing: with the Monday 09:00 schedule the 60 hour reminder lands on
+  Wednesday 21:00 Bogota and the record expires Thursday 08:30. 48 hours would
+  leave a working day.
+- "below minimum age (1 days)" and "1 days old" keep a plural for one day.
+- Cosmetic: `stack.trail.trail`; `GLOBAL_SERVICES_REGION` in `config.py`
+  repeats `verify.GLOBAL_CLIENT_REGION`.
+- Plan 4 threat model: approval ids appear in clear in the CloudTrail data
+  events (item keys) and in the reminder execution's input; the committed plan
+  files name a local path and an SSO profile.
