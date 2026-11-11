@@ -157,3 +157,9 @@ def test_handler_dispatches_every_mode(monkeypatch, mode, module, function):
 
     assert notifier.handler(event, None) == {"mode": mode}
     assert calls == [event]
+
+
+def test_fit_subject_keeps_99_characters_and_falls_back_at_100():
+    # SNS refuses an email subject of 100 characters or more.
+    assert report.fit_subject("s" * 99, "fallback") == "s" * 99
+    assert report.fit_subject("s" * 100, "fallback") == "fallback"

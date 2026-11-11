@@ -239,3 +239,43 @@ def test_truncate_raises_when_suffix_cannot_fit():
 )
 def test_count_noun_uses_the_singular_only_for_one(count: int, expected: str):
     assert count_noun(count, "deletion") == expected
+
+
+def test_finding_and_error_to_dict_shapes():
+    found = Finding(
+        region="us-east-1",
+        kind="ebs-volume",
+        resource_id="vol-1",
+        arn=None,
+        detail="8 GiB",
+        lab=True,
+        candidate=True,
+        reason="tag Purpose=lab",
+        age_days=9,
+        estimated_monthly_usd=0.64,
+        eligible=True,
+        tags=[{"Key": "Purpose", "Value": "lab"}],
+    )
+    error = ErrorFinding("eu-west-1", "ec2:DescribeVolumes", "denied", "access-denied")
+
+    # The plan is what gets approved and hashed: its keys are a contract, and
+    # tags (which can hold anything) stay out of it.
+    assert found.to_dict() == {
+        "region": "us-east-1",
+        "kind": "ebs-volume",
+        "resourceId": "vol-1",
+        "arn": None,
+        "detail": "8 GiB",
+        "lab": True,
+        "candidate": True,
+        "eligible": True,
+        "reason": "tag Purpose=lab",
+        "ageDays": 9,
+        "estimatedMonthlyUsd": 0.64,
+    }
+    assert error.to_dict() == {
+        "region": "eu-west-1",
+        "service": "ec2:DescribeVolumes",
+        "error": "denied",
+        "classification": "access-denied",
+    }

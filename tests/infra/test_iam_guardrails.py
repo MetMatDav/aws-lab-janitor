@@ -18,6 +18,7 @@ from tests.infra.helpers import (
     executor_statements,
     function_role_id,
     iam_statements,
+    reminder_role_id,
     render,
     resources,
     role_statements,
@@ -341,6 +342,33 @@ def test_executor_denies_mutations_on_kept_resources(any_template: assertions.Te
     assert deny["Condition"] == {
         "StringEquals": {f"aws:ResourceTag/{KEEP_TAG_KEY}": KEEP_TAG_VALUE}
     }
+
+
+def test_no_policy_statement_uses_not_action_or_not_resource(any_template: assertions.Template):
+    # Every check in this file reads Action and Resource; a NotAction or
+    # NotResource statement would grant things none of them can see.
+    for logical_id, _roles, statement in _all_policy_statements(any_template):
+        assert "NotAction" not in statement, logical_id
+        assert "NotResource" not in statement, logical_id
+        assert "NotPrincipal" not in statement, logical_id
+
+
+@pytest.mark.parametrize(
+    "handler", [DETECTOR_HANDLER, NOTIFIER_HANDLER, APPROVAL_HANDLER, EXECUTOR_HANDLER]
+)
+def test_function_roles_carry_only_the_basic_execution_managed_policy(
+    any_template: assertions.Template, handler: str
+):
+    # A managed policy is invisible to the statement scans above.
+    role = any_template.find_resources("AWS::IAM::Role")[function_role_id(any_template, handler)]
+    (managed,) = role["Properties"]["ManagedPolicyArns"]
+    assert render(managed).endswith(":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole")
+
+
+def test_state_machine_roles_have_no_managed_policies(any_template: assertions.Template):
+    roles = any_template.find_resources("AWS::IAM::Role")
+    for role_id in (state_machine_role_id(any_template), reminder_role_id(any_template)):
+        assert "ManagedPolicyArns" not in roles[role_id]["Properties"], role_id
 
 
 def test_executor_role_action_set_is_exact(any_template: assertions.Template):

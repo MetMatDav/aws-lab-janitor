@@ -50,19 +50,24 @@ def detect_global(ctx: SweepContext, findings: list[Finding], errors: list[Error
         return read_tags(ctx, errors, REGION, "cloudwatch:ListTagsForResource", fetch)
 
     def run_buckets() -> None:
-        for bucket in collect(client("s3"), "list_buckets", "Buckets"):
+        for bucket in collect(client("s3"), "list_buckets", "Buckets", deadline=ctx.deadline):
             if bucket["Name"].startswith(CDK_BUCKET_PREFIX):
                 continue
             findings.append(_bucket(bucket, bucket_tags(bucket["Name"]), ctx))
 
     def run_distributions() -> None:
         for distribution in collect(
-            client("cloudfront"), "list_distributions", "DistributionList.Items"
+            client("cloudfront"),
+            "list_distributions",
+            "DistributionList.Items",
+            deadline=ctx.deadline,
         ):
             findings.append(_distribution(distribution, ctx))
 
     def run_dashboards() -> None:
-        for dashboard in collect(client("cloudwatch"), "list_dashboards", "DashboardEntries"):
+        for dashboard in collect(
+            client("cloudwatch"), "list_dashboards", "DashboardEntries", deadline=ctx.deadline
+        ):
             name = dashboard["DashboardName"]
             arn = dashboard.get("DashboardArn") or _dashboard_arn(name, ctx)
             lab = name.startswith(ctx.settings.name_prefix)

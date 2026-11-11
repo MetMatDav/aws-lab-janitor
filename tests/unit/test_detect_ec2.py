@@ -281,6 +281,41 @@ def test_deadline_passing_between_snapshot_pages_records_time_budget(ec2_stub, c
     assert len(ec2_stub._queue) == 3
 
 
+def test_deadline_passing_between_nat_gateway_pages_records_time_budget(ec2_stub, ctx, monkeypatch):
+    """Every paginated listing checks the clock between pages, not only the large ones."""
+
+    def two_pages(stub, params):
+        page_one = {"NatGateways": [], "NextToken": "page2"}
+        stub.add_response("describe_nat_gateways", page_one, params)
+        stub.add_response(
+            "describe_nat_gateways", {"NatGateways": []}, {**params, "NextToken": "page2"}
+        )
+
+    class LateClock:
+        @staticmethod
+        def time():
+            return ctx.deadline + 1
+
+    def expire_deadline(**_kwargs):
+        monkeypatch.setattr("detector.sweep.time", LateClock)
+
+    stub_ec2(ec2_stub, custom={"describe_nat_gateways": two_pages})
+    ec2_stub.client.meta.events.register("after-call.ec2.DescribeNatGateways", expire_deadline)
+    _findings, errors = run(ctx)
+
+    assert [(e.service, e.classification) for e in errors] == [
+        ("ec2:DescribeNatGateways", "time-budget"),
+        ("ec2:DescribeAddresses", "time-budget"),
+        ("ec2:DescribeVolumes", "time-budget"),
+        ("ec2:DescribeImages", "time-budget"),
+        ("ec2:DescribeSnapshots", "time-budget"),
+        ("ec2:DescribeVpcEndpoints", "time-budget"),
+        ("ec2:DescribeNetworkInterfaces", "time-budget"),
+    ]
+    # Still queued: the second NAT page (never requested) and the six skipped calls.
+    assert len(ec2_stub._queue) == 7
+
+
 def test_client_creation_failure_is_recorded_not_raised(ctx_factory):
     class BrokenClients:
         def get(self, service, region):

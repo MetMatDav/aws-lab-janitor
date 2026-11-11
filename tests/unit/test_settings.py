@@ -57,3 +57,24 @@ def test_deletions_enabled_requires_exact_true(raw, expected):
     if raw is not None:
         env["DELETIONS_ENABLED"] = raw
     assert load_settings({}, env).deletions_enabled is expected
+
+
+def test_prefix_shorter_than_three_is_rejected():
+    # A one or two letter prefix would match half the account.
+    env = dict(os.environ, LAB_NAME_PREFIX="LA")
+    with pytest.raises(ValueError, match="LAB_NAME_PREFIX must be at least 3 characters"):
+        load_settings({}, env)
+    assert load_settings({}, dict(os.environ, LAB_NAME_PREFIX="LA-")).name_prefix == "LA-"
+
+
+@pytest.mark.parametrize("name", ["LAB_TAG_KEY", "LAB_TAG_VALUE", "KEEP_TAG_KEY", "KEEP_TAG_VALUE"])
+def test_each_empty_marker_is_rejected(name):
+    # An empty marker would match resources that have no such tag at all.
+    with pytest.raises(ValueError, match=f"{name} must not be empty"):
+        load_settings({}, dict(os.environ, **{name: ""}))
+
+
+def test_region_falls_back_to_us_east_1():
+    env = {key: value for key, value in os.environ.items() if key != "AWS_REGION"}
+    assert load_settings({}, env).region == "us-east-1"
+    assert load_settings({}, dict(env, AWS_REGION="eu-west-1")).region == "eu-west-1"

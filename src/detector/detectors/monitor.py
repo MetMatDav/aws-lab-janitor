@@ -35,7 +35,9 @@ def detect_internet_monitor(
         return tags if fetched else None
 
     def run_monitors() -> None:
-        for monitor in collect(internetmonitor(), "list_monitors", "Monitors"):
+        for monitor in collect(
+            internetmonitor(), "list_monitors", "Monitors", deadline=ctx.deadline
+        ):
             lab = monitor["MonitorName"].startswith(ctx.settings.name_prefix)
             tags = monitor_tags(monitor["MonitorArn"]) if lab else []
             findings.append(_monitor(monitor, lab, tags, region, ctx))

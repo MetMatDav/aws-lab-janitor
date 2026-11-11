@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import time
@@ -455,6 +456,25 @@ def test_main_never_consults_the_audit_table(harness, monkeypatch, capsys):
     assert harness.audit.eligibility_lookups == []
     assert harness.audit.events == []
     assert '"candidates"' in capsys.readouterr().out
+
+
+def test_main_prints_a_plan_and_never_writes(harness, monkeypatch, capsys):
+    """The local entry point is read-only: no plan upload, no audit item, no run summary."""
+    monkeypatch.setattr(handler_module, "ClientFactory", lambda: harness.factory)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("main() must not build the plan store or the audit client")
+
+    monkeypatch.setattr(handler_module, "build_dependencies", forbidden)
+
+    handler_module.main()
+
+    printed = json.loads(capsys.readouterr().out)
+    assert re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{4}", printed["runId"])
+    assert printed["dryRun"] is True
+    assert harness.store.puts == []
+    assert harness.audit.events == []
+    assert harness.audit.summaries == []
 
 
 def test_detect_plan_drops_janitor_owned_findings(harness):

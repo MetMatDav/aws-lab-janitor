@@ -21,11 +21,11 @@ def detect_rds(
         return ctx.clients.get("rds", region)
 
     def run_instances() -> None:
-        for db in collect(rds(), "describe_db_instances", "DBInstances"):
+        for db in collect(rds(), "describe_db_instances", "DBInstances", deadline=ctx.deadline):
             findings.append(_db_instance(db, region, ctx))
 
     def run_clusters() -> None:
-        for cluster in collect(rds(), "describe_db_clusters", "DBClusters"):
+        for cluster in collect(rds(), "describe_db_clusters", "DBClusters", deadline=ctx.deadline):
             findings.append(_db_cluster(cluster, region, ctx))
 
     safe(ctx, errors, region, "rds:DescribeDBInstances", run_instances)
@@ -46,15 +46,26 @@ def detect_elasticache(
 
         def fetch() -> None:
             tags.extend(
-                collect(elasticache(), "list_tags_for_resource", "TagList", ResourceName=arn)
+                collect(
+                    elasticache(),
+                    "list_tags_for_resource",
+                    "TagList",
+                    deadline=ctx.deadline,
+                    ResourceName=arn,
+                )
             )
 
         safe(ctx, errors, region, "elasticache:ListTagsForResource", fetch)
         return tags
 
     def run_clusters() -> None:
-        for cluster in collect(elasticache(), "describe_cache_clusters", "CacheClusters"):
-            tags = cluster_tags(cluster["ARN"])
+        for cluster in collect(
+            elasticache(), "describe_cache_clusters", "CacheClusters", deadline=ctx.deadline
+        ):
+            # Without an ARN there is nothing to look the tags up by; the
+            # cluster is still reported, marked by its name alone.
+            arn = cluster.get("ARN")
+            tags = cluster_tags(arn) if arn else []
             findings.append(_cache_cluster(cluster, tags, region, ctx))
 
     safe(ctx, errors, region, "elasticache:DescribeCacheClusters", run_clusters)

@@ -36,7 +36,9 @@ def detect_elbv2(
         return tags
 
     def run_load_balancers() -> None:
-        load_balancers = collect(elbv2(), "describe_load_balancers", "LoadBalancers")
+        load_balancers = collect(
+            elbv2(), "describe_load_balancers", "LoadBalancers", deadline=ctx.deadline
+        )
         arns = [lb["LoadBalancerArn"] for lb in load_balancers]
         tags: dict[str, list[dict]] = {}
         for start in range(0, len(arns), TAG_BATCH_SIZE):

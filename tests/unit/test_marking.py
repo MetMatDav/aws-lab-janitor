@@ -48,3 +48,25 @@ def test_is_janitor_owned():
     assert not is_janitor_owned([{"Key": "Purpose", "Value": "lab"}])
     assert not is_janitor_owned([])
     assert not is_janitor_owned(None)
+
+
+def test_lowercase_tag_shape_is_read(settings):
+    # Internet Monitor and a few other services return {"key", "value"} tags.
+    assert is_lab_tagged([{"key": "Purpose", "value": "lab"}], settings)
+    assert is_kept([{"key": "janitor", "value": "keep"}], settings)
+
+
+@pytest.mark.parametrize(
+    "tags",
+    [
+        None,
+        [],
+        [{"Key": "janitor", "Value": "Keep"}],
+        [{"Key": "Janitor", "Value": "keep"}],
+        [{"Key": "janitor", "Value": ""}],
+        [{"Key": "Purpose", "Value": "lab"}],
+    ],
+)
+def test_is_kept_negatives(settings, tags):
+    # Only the exact key and value exempt a resource; a near miss must not.
+    assert is_kept(tags, settings) is False

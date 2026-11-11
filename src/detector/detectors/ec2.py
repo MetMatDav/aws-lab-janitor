@@ -34,11 +34,13 @@ def detect_ec2(
 
     def run_nat_gateways() -> None:
         state = [{"Name": "state", "Values": ["available"]}]
-        for nat in collect(ec2(), "describe_nat_gateways", "NatGateways", Filter=state):
+        for nat in collect(
+            ec2(), "describe_nat_gateways", "NatGateways", deadline=ctx.deadline, Filter=state
+        ):
             findings.append(_nat_gateway(nat, region, ctx))
 
     def run_addresses() -> None:
-        for address in collect(ec2(), "describe_addresses", "Addresses"):
+        for address in collect(ec2(), "describe_addresses", "Addresses", deadline=ctx.deadline):
             findings.append(_address(address, region, ctx))
 
     def run_volumes() -> None:
@@ -49,7 +51,14 @@ def detect_ec2(
     def run_images() -> None:
         nonlocal images_complete
         # Disabled AMIs are hidden by default but still pin their snapshots.
-        images = collect(ec2(), "describe_images", "Images", Owners=["self"], IncludeDisabled=True)
+        images = collect(
+            ec2(),
+            "describe_images",
+            "Images",
+            deadline=ctx.deadline,
+            Owners=["self"],
+            IncludeDisabled=True,
+        )
         # Complete the map before building findings so one malformed image cannot truncate it.
         for image in images:
             for mapping in image.get("BlockDeviceMappings", []):
@@ -69,7 +78,9 @@ def detect_ec2(
             findings.append(_snapshot(snapshot, known, region, ctx))
 
     def run_vpc_endpoints() -> None:
-        for endpoint in collect(ec2(), "describe_vpc_endpoints", "VpcEndpoints"):
+        for endpoint in collect(
+            ec2(), "describe_vpc_endpoints", "VpcEndpoints", deadline=ctx.deadline
+        ):
             if endpoint.get("VpcEndpointType") == "Interface":
                 findings.append(_vpc_endpoint(endpoint, region, ctx))
 

@@ -218,3 +218,17 @@ def test_past_deadline_makes_no_calls(rds_stub, cache_stub, ctx_past_deadline):
         assert {e.classification for e in errors} == {"time-budget"}
     rds_stub.assert_no_pending_responses()
     cache_stub.assert_no_pending_responses()
+
+
+def test_cache_cluster_without_arn_is_reported_without_a_tag_lookup(cache_stub, ctx):
+    cluster = cache_cluster("LAB-no-arn")
+    del cluster["ARN"]
+    cache_stub.add_response("describe_cache_clusters", {"CacheClusters": [cluster]}, {})
+
+    # No tag lookup is queued: asking for the tags of "None" would fail the test.
+    findings, errors = run_detector(detect_elasticache, ctx)
+
+    assert errors == []
+    found = by_id(findings, "elasticache")["LAB-no-arn"]
+    assert (found.lab, found.candidate, found.arn, found.tags) == (True, False, None, [])
+    cache_stub.assert_no_pending_responses()
