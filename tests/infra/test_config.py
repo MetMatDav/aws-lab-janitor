@@ -98,8 +98,8 @@ def test_allowed_regions_from_comma_string_and_list():
         "us-east-1",
         "eu-west-1",
     )
-    assert _config(allowedRegions=["us-gov-west-1", " ap-southeast-2 "]).allowed_regions == (
-        "us-gov-west-1",
+    assert _config(allowedRegions=["us-east-1", " ap-southeast-2 "]).allowed_regions == (
+        "us-east-1",
         "ap-southeast-2",
     )
     assert _config(allowedRegions="us-east-1,,").allowed_regions == ("us-east-1",)
@@ -131,3 +131,39 @@ def test_placeholder_or_malformed_email_is_rejected_at_synth(key: str, value: st
 
     with pytest.raises(ValueError, match=f"{key} must be an email address"):
         JanitorConfig.from_node(cdk.App(context=context).node)
+
+
+@pytest.mark.parametrize("value", ["full", "dataEventsOnly", "none"])
+def test_create_trail_accepts_the_three_modes(value: str):
+    assert _config(createTrail=value).create_trail == value
+
+
+def test_create_trail_defaults_to_full():
+    assert _config().create_trail == "full"
+
+
+@pytest.mark.parametrize("value", ["FULL", "data", "", True, 1])
+def test_create_trail_rejects_other_values(value: object):
+    with pytest.raises(ValueError, match="createTrail must be one of full, dataEventsOnly, none"):
+        _config(createTrail=value)
+
+
+def test_allowed_regions_must_include_us_east_1():
+    with pytest.raises(ValueError, match="allowedRegions must include us-east-1"):
+        _config(allowedRegions="eu-west-1,us-west-2")
+    assert _config(allowedRegions="eu-west-1,us-east-1").allowed_regions == (
+        "eu-west-1",
+        "us-east-1",
+    )
+
+
+@pytest.mark.parametrize("value", ["a@example.com\n", "a@exämple.com", "a b@example.com"])
+def test_email_pattern_is_ascii_and_anchored(value: str):
+    with pytest.raises(ValueError, match="reportEmail must be an email address"):
+        _config(reportEmail=value)
+
+
+def test_region_pattern_is_ascii_and_anchored():
+    # An Arabic-Indic digit matches a bare \d; region names are ASCII.
+    with pytest.raises(ValueError, match="invalid region name"):
+        _config(allowedRegions="us-east-1,eu-west-\u0661")

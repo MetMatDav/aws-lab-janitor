@@ -3,8 +3,8 @@
 Context keys: ``reportEmail`` (required, or ``JANITOR_REPORT_EMAIL``),
 ``alertEmail``, ``approvalEmail``, ``dryRun``, ``minAgeDays``,
 ``scheduleTimezone``, ``scheduleHour``, ``janitorEnabled``,
-``reservedConcurrency``, ``allowedRegions``, ``approvalAuth`` and
-``approverRoleArn``.
+``reservedConcurrency``, ``allowedRegions``, ``approvalAuth``,
+``approverRoleArn`` and ``createTrail``.
 """
 
 import os
@@ -21,9 +21,16 @@ _FALSY_FLAGS = ("false", "False")
 MAX_SCHEDULE_HOUR = 23
 APPROVAL_AUTH_MODES = ("link", "iam", "both")
 DEFAULT_APPROVAL_AUTH = "link"
-_REGION = re.compile(r"^[a-z]{2}(-[a-z]+)+-\d$")
-_ROLE_ARN = re.compile(r"^arn:aws[a-z-]*:iam::\d{12}:role/.+$")
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+CREATE_TRAIL_MODES = ("full", "dataEventsOnly", "none")
+DEFAULT_CREATE_TRAIL = "full"
+# The executor reaches global services (CloudWatch dashboards) through this region.
+GLOBAL_SERVICES_REGION = "us-east-1"
+# Matched with fullmatch and re.ASCII: "$" would accept a trailing newline, and a
+# bare \d would accept non-ASCII digits. An email part is printable ASCII
+# without "@" or spaces.
+_REGION = re.compile(r"[a-z]{2}(-[a-z]+)+-\d", re.ASCII)
+_ROLE_ARN = re.compile(r"arn:aws[a-z-]*:iam::\d{12}:role/.+", re.ASCII)
+_EMAIL = re.compile(r"[!-?A-~]+@[!-?A-~]+\.[!-?A-~]+", re.ASCII)
 
 
 def _context(node: Node, key: str, default: Any) -> Any:
@@ -79,8 +86,13 @@ def _regions(value: Any) -> tuple[str, ...]:
         raise ValueError(f"allowedRegions must be a comma-separated string or list, got {value!r}")
     regions = tuple(entry.strip() for entry in entries if entry.strip())
     for region in regions:
-        if not _REGION.match(region):
+        if not _REGION.fullmatch(region):
             raise ValueError(f"allowedRegions has an invalid region name: {region!r}")
+    if regions and GLOBAL_SERVICES_REGION not in regions:
+        raise ValueError(
+            f"allowedRegions must include {GLOBAL_SERVICES_REGION}: "
+            "CloudWatch dashboards are deleted through it"
+        )
     return regions
 
 
@@ -92,7 +104,7 @@ def _email(key: str, value: Any) -> str:
     deploy command (``-c reportEmail=TU_CORREO``) would cost a full rollback.
     Failing here keeps the mistake inside ``cdk synth``.
     """
-    if not isinstance(value, str) or not _EMAIL.match(value):
+    if not isinstance(value, str) or not _EMAIL.fullmatch(value):
         raise ValueError(f"{key} must be an email address such as you@example.com, got {value!r}")
     return value
 
@@ -102,6 +114,15 @@ def _approval_auth(value: Any) -> str:
     if value not in APPROVAL_AUTH_MODES:
         raise ValueError(
             f"approvalAuth must be one of {', '.join(APPROVAL_AUTH_MODES)}, got {value!r}"
+        )
+    return value
+
+
+def _create_trail(value: Any) -> str:
+    """Check ``createTrail`` is one of the supported modes."""
+    if value not in CREATE_TRAIL_MODES:
+        raise ValueError(
+            f"createTrail must be one of {', '.join(CREATE_TRAIL_MODES)}, got {value!r}"
         )
     return value
 
@@ -116,7 +137,7 @@ def _approver_role_arn(value: Any, approval_auth: str) -> str | None:
         if approval_auth != "link":
             raise ValueError(f"approvalAuth={approval_auth} needs -c approverRoleArn=<role ARN>")
         return None
-    if not isinstance(value, str) or not _ROLE_ARN.match(value):
+    if not isinstance(value, str) or not _ROLE_ARN.fullmatch(value):
         raise ValueError(f"approverRoleArn must be an IAM role ARN, got {value!r}")
     return value
 
@@ -137,6 +158,7 @@ class JanitorConfig:
     allowed_regions: tuple[str, ...]
     approval_auth: str
     approver_role_arn: str | None
+    create_trail: str
 
     @classmethod
     def from_node(cls, node: Node) -> "JanitorConfig":
@@ -170,4 +192,5 @@ class JanitorConfig:
             approver_role_arn=_approver_role_arn(
                 node.try_get_context("approverRoleArn"), approval_auth
             ),
+            create_trail=_create_trail(_context(node, "createTrail", DEFAULT_CREATE_TRAIL)),
         )
