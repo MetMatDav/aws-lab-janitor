@@ -49,3 +49,24 @@ Deferred to Plan 3 unless noted. None blocks the dress rehearsal.
 - CDK: config regexes without `re.ASCII`/`fullmatch`; `APPROVAL_KEYS` constant versus the inline `RUN#*` condition; the HTTP API has the generic name `Api`; monitor action literals are repeated in `MUTATING_ACTIONS`; the policy scan does not cover KMS key policies, `Lambda::Permission` or `NotAction` statements (none present); `workflow_approval.py` types `parameters: dict` without arguments and its tests slice join parts by position.
 - CLI: the signing region is not derived from the API host (a wrong region shows up as 403); no tests for the `HTTPError`/`URLError` paths; `execute-api:Invoke` for an administrator permission set is unverified until the IAM route is exercised live.
 - Spec (Plan 4): the notifier holds `dynamodb:UpdateItem` on `APPROVAL#*` as well as `PutItem` (token refresh on retry); `nag.py` cites ADR-0008 before `docs/adr/` exists.
+
+## Dress rehearsal of 2026-11-11 (Plan 2, Task 10)
+
+The rehearsal passed: run `20261111T192012Z-ecb0` went through approval by email
+link and ended with the decoy `SKIPPED` (`deletions-disabled`). Record in the
+runbook. What it left open, for Plan 3:
+
+- Live-unverified paths: a wrong confirmation code on a `PENDING` approval
+  (expected `400`, record stays `PENDING`), the reject path (`RecordRejected`,
+  `MirrorRejected`, `NotifyRejected`), the expiry path and the IAM route with
+  `scripts/approve.py`. Fold a reject rehearsal and the wrong-code check into
+  the controlled deletion test.
+- The first Plan 2 deploy (2026-11-03) rolled back on a placeholder email; the
+  stack stayed on the Plan 1 template for eight days with nothing signalling
+  it. The heartbeat work in Plan 3 should also make a stale deployment visible
+  (for example the deployed commit in the report footer).
+- Deviation from the plan text: the agent created and deleted the decoy with
+  the administrator profile instead of the owner. Both calls are plain
+  CloudWatch dashboard calls on an empty `LAB-` dashboard.
+- A decided approval answers `409` to `GET` as well as `POST`; the runbook only
+  mentioned the second decision.

@@ -346,6 +346,31 @@ even though the execution itself is not a dry run.
 To rehearse a rejection or an expiry, decide `reject`, or wait out the 72 hours,
 and look for the `REJECTED` or `EXPIRED` mirror and the matching email.
 
+### Rehearsal record: 2026-11-11
+
+Run `20261111T192012Z-ecb0`, approval `7f69146f-7354-4595-bf89-bf59b304e762`,
+decoy `LAB-decoy-plan2`, decided through the email link.
+
+- State path: `Defaults`, `Normalize`, `Detect`, `HasCandidates`,
+  `NewApprovalId`, `RequestApproval`, `Apply`, `RecordApplied`, `NotifyResult`,
+  `Applied`. About 25 seconds from start to the approval wait, 2 seconds from
+  the decision to `SUCCEEDED`.
+- The plan held one candidate (`cw-dashboard LAB-decoy-plan2`, reason `name
+  prefix LAB-`). The approval record went `PENDING` to `APPROVED`.
+- The executor logged `armed=False` and `0 deleted, 0 failed, 1 skipped`. The
+  audit table holds `DETECTED`, `PROPOSED` and `SKIPPED` (`deletions-disabled`)
+  for the decoy, and the `APPROVED` mirror with the counts. The decoy was still
+  there after the run and was deleted by hand.
+- Delivery, not just publish: the reports topic delivered 2 of 2 messages
+  (weekly report and result) and the approvals topic delivered the request,
+  with no failed notifications.
+- Once decided, both `GET` and `POST` on the approval returned `409` and the
+  record did not change. A form with an invalid decision returned `400`.
+
+Not exercised in this rehearsal: a wrong confirmation code on a `PENDING`
+approval, the reject path, the expiry path and the IAM route. They are covered
+by unit tests only; see the follow-ups file.
+
 ## Pause and resume
 
 To pause the weekly run, redeploy with the schedule disabled:
