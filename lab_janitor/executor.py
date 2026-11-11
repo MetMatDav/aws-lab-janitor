@@ -53,8 +53,8 @@ LAB_TAG_LOCK_REASON = (
 )
 LAB_NAME_LOCK_REASON = (
     "Resource names are unknown at deploy time; the grant is limited to the LAB- name prefix, "
-    "and kept resources are excluded by the executor's re-verification (the keep-tag Deny is "
-    "verified in Plan 3)"
+    "and kept resources are refused by the keep-tag Deny (both resource types support "
+    "aws:ResourceTag) and again by the executor's re-verification"
 )
 
 

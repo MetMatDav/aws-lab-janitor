@@ -4,7 +4,7 @@ BIN := $(VENV)/bin
 # cfn-lint resolve to it without activating the venv.
 export PATH := $(CURDIR)/$(BIN):$(PATH)
 
-.PHONY: install lint fmt test synth nag
+.PHONY: install lint fmt test synth nag simulate
 
 install:
 	test -d $(VENV) || uv venv --python 3.13 $(VENV)
@@ -25,3 +25,9 @@ synth:
 
 nag:
 	npx cdk synth --strict --quiet -c reportEmail=$${JANITOR_REPORT_EMAIL:-ci@example.com}
+
+# Needs AWS credentials (iam:SimulateCustomPolicy, read-only). Synthesizes the
+# stack itself for a placeholder account; pass a profile with
+# AWS_PROFILE=<profile> make simulate.
+simulate:
+	python -m tests.iam.simulate_policies

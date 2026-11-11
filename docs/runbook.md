@@ -455,6 +455,33 @@ npx cdk deploy LabJanitorStack --require-approval broadening \
 
 To resume, redeploy without `-c janitorEnabled=false` (it defaults to `true`).
 
+## IAM simulation
+
+`tests/iam/simulate_policies.py` asks IAM what the executor role's policy
+decides for 22 fixed cases: lab and non-lab names, the lab tag present and
+absent, the keep tag, and actions the janitor must never have
+(`TerminateInstances`, `DeleteBucket`, `CreateTags` and others). The last run is
+committed as `docs/evidence/iam-simulation.txt`. Rerun it after any change to
+the executor's policy, from the repository root:
+
+```
+python -m tests.iam.simulate_policies --profile <any-profile-with-iam-read>
+```
+
+It needs credentials for one read-only call (`iam:SimulateCustomPolicy`), exits
+1 if a decision differs from the expected one, and synthesizes the stack itself
+for a placeholder account, so the report never carries a real account id. Do
+not point it at `cdk.out`: the CDK CLI replaces `CDK_DEFAULT_ACCOUNT` with the
+caller's account.
+
+What it proves is the policy logic: for a resource with these tags, this is the
+decision. That each service sends the tag key when it authorizes the call comes
+from the Service Authorization Reference, which lists `aws:ResourceTag` for the
+EC2 snapshot, volume and Elastic IP resource types, the CloudWatch dashboard
+and the Internet Monitor monitor (checked on 2026-11-11). The keep-tag Deny has
+not been exercised against a live call: the executor re-verifies each item and
+skips a kept resource before IAM is ever asked.
+
 ## Alarms
 
 Every alarm notifies the alerts topic when it fires and again when it recovers.

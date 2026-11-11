@@ -1,0 +1,28 @@
+IAM policy simulation of the lab janitor executor role
+Date: 2026-11-11  API: iam:SimulateCustomPolicy  Policy: executor role, synthesized
+Account id 123456789012 and all resource ids are placeholders.
+
+PASS  dashboard with the lab prefix: cloudwatch:DeleteDashboards  arn:aws:cloudwatch::123456789012:dashboard/LAB-demo  tags=-  leadingKeys=-  expected=allowed  actual=allowed
+PASS  dashboard without the lab prefix: cloudwatch:DeleteDashboards  arn:aws:cloudwatch::123456789012:dashboard/PROD-demo  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  kept lab dashboard: cloudwatch:DeleteDashboards  arn:aws:cloudwatch::123456789012:dashboard/LAB-demo  tags=janitor=keep  leadingKeys=-  expected=explicitDeny  actual=explicitDeny
+PASS  monitor with the lab prefix: internetmonitor:DeleteMonitor  arn:aws:internetmonitor:us-east-1:123456789012:monitor/LAB-demo  tags=-  leadingKeys=-  expected=allowed  actual=allowed
+PASS  monitor without the lab prefix: internetmonitor:DeleteMonitor  arn:aws:internetmonitor:us-east-1:123456789012:monitor/PROD-demo  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  kept lab monitor: internetmonitor:DeleteMonitor  arn:aws:internetmonitor:us-east-1:123456789012:monitor/LAB-demo  tags=janitor=keep  leadingKeys=-  expected=explicitDeny  actual=explicitDeny
+PASS  disabling a kept lab monitor: internetmonitor:UpdateMonitor  arn:aws:internetmonitor:us-east-1:123456789012:monitor/LAB-demo  tags=janitor=keep  leadingKeys=-  expected=explicitDeny  actual=explicitDeny
+PASS  lab-tagged snapshot: ec2:DeleteSnapshot  arn:aws:ec2:us-east-1::snapshot/snap-0123456789abcdef0  tags=Purpose=lab  leadingKeys=-  expected=allowed  actual=allowed
+PASS  untagged snapshot: ec2:DeleteSnapshot  arn:aws:ec2:us-east-1::snapshot/snap-0123456789abcdef0  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  kept lab snapshot: ec2:DeleteSnapshot  arn:aws:ec2:us-east-1::snapshot/snap-0123456789abcdef0  tags=Purpose=lab,janitor=keep  leadingKeys=-  expected=explicitDeny  actual=explicitDeny
+PASS  lab-tagged volume: ec2:DeleteVolume  arn:aws:ec2:us-east-1:123456789012:volume/vol-0123456789abcdef0  tags=Purpose=lab  leadingKeys=-  expected=allowed  actual=allowed
+PASS  untagged volume: ec2:DeleteVolume  arn:aws:ec2:us-east-1:123456789012:volume/vol-0123456789abcdef0  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  lab-tagged address: ec2:ReleaseAddress  arn:aws:ec2:us-east-1:123456789012:elastic-ip/eipalloc-0123456789abcdef0  tags=Purpose=lab  leadingKeys=-  expected=allowed  actual=allowed
+PASS  untagged address: ec2:ReleaseAddress  arn:aws:ec2:us-east-1:123456789012:elastic-ip/eipalloc-0123456789abcdef0  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  kept lab address: ec2:ReleaseAddress  arn:aws:ec2:us-east-1:123456789012:elastic-ip/eipalloc-0123456789abcdef0  tags=Purpose=lab,janitor=keep  leadingKeys=-  expected=explicitDeny  actual=explicitDeny
+PASS  lab-tagged instance: ec2:TerminateInstances  arn:aws:ec2:us-east-1:123456789012:instance/i-0123456789abcdef0  tags=Purpose=lab  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  tagging a snapshot: ec2:CreateTags  arn:aws:ec2:us-east-1::snapshot/snap-0123456789abcdef0  tags=Purpose=lab  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  the plans bucket itself: s3:DeleteBucket  arn:aws:s3:::plans  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  a stored plan: s3:DeleteObject  arn:aws:s3:::plans/plans/run/plan.json  tags=-  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  lab-tagged database: rds:DeleteDBInstance  arn:aws:rds:us-east-1:123456789012:db:demo  tags=Purpose=lab  leadingKeys=-  expected=implicitDeny  actual=implicitDeny
+PASS  audit item under a run: dynamodb:PutItem  arn:aws:dynamodb:us-east-1:123456789012:table/audit  tags=-  leadingKeys=RUN#20261110T140012Z-7f3a  expected=allowed  actual=allowed
+PASS  audit item under an approval: dynamodb:PutItem  arn:aws:dynamodb:us-east-1:123456789012:table/audit  tags=-  leadingKeys=APPROVAL#abc  expected=implicitDeny  actual=implicitDeny
+
+22 cases, 22 passed, 0 failed
