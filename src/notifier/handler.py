@@ -2,7 +2,9 @@
 
 The Step Functions state machine invokes it with a ``mode``: ``report`` (weekly
 report), ``approval`` (ask a human to approve the plan), ``result`` (what the
-executor did), ``expired`` and ``rejected`` (the approval did not happen).
+executor did), ``expired`` and ``rejected`` (the approval did not happen). The
+reminder state machine invokes it with ``reminder`` (the approval is still
+pending after 60 hours).
 """
 
 import os
@@ -10,7 +12,7 @@ import os
 import boto3
 from botocore.client import BaseClient
 
-from notifier import approval, outcomes, report
+from notifier import approval, outcomes, reminder, report
 from shared.approvals import ApprovalStore
 from shared.plan_store import PlanStore
 
@@ -35,6 +37,7 @@ def handler(event: dict, context) -> dict:
         "result": outcomes.publish_result,
         "expired": outcomes.publish_expired,
         "rejected": outcomes.publish_rejected,
+        "reminder": reminder.send_reminder,
     }
     mode = event.get("mode")
     if mode not in modes:

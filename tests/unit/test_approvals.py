@@ -376,3 +376,47 @@ def test_refresh_token_propagates_other_errors(ddb_stub):
 
     with pytest.raises(ClientError):
         store(ddb_stub).refresh_token(APPROVAL_ID, "new-token")
+
+
+def mark_reminded_params() -> dict:
+    return {
+        "TableName": TABLE,
+        "Key": KEY,
+        "UpdateExpression": "SET remindedAt = :now",
+        "ConditionExpression": (
+            "#s = :pending AND expiresAt > :now AND attribute_not_exists(remindedAt)"
+        ),
+        "ExpressionAttributeNames": {"#s": "status"},
+        "ExpressionAttributeValues": {":now": {"S": NOW}, ":pending": {"S": "PENDING"}},
+        "ReturnValues": "ALL_NEW",
+    }
+
+
+def test_mark_reminded_stamps_a_pending_approval_once(ddb_stub):
+    ddb_stub.add_response(
+        "update_item",
+        {"Attributes": {**RECORD_ITEM, "remindedAt": {"S": NOW}}},
+        mark_reminded_params(),
+    )
+
+    assert store(ddb_stub).mark_reminded(APPROVAL_ID, NOW) == RECORD
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_mark_reminded_returns_none_when_the_condition_fails(ddb_stub):
+    # Decided, expired or already reminded: there is nothing to remind about.
+    conditional_failure(ddb_stub, mark_reminded_params())
+
+    assert store(ddb_stub).mark_reminded(APPROVAL_ID, NOW) is None
+    ddb_stub.assert_no_pending_responses()
+
+
+def test_mark_reminded_raises_other_errors(ddb_stub):
+    ddb_stub.add_client_error(
+        "update_item",
+        service_error_code="ProvisionedThroughputExceededException",
+        expected_params=mark_reminded_params(),
+    )
+
+    with pytest.raises(ClientError):
+        store(ddb_stub).mark_reminded(APPROVAL_ID, NOW)

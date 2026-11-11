@@ -1,6 +1,7 @@
 """The approval branch of the weekly workflow.
 
-``NewApprovalId`` names the approval, ``RequestApproval`` emails the link and
+``NewApprovalId`` names the approval, ``StartReminder`` starts the reminder
+state machine without waiting for it, ``RequestApproval`` emails the link and
 waits up to 72 hours for the decision (task token), and the run ends one of
 three ways:
 
@@ -33,6 +34,8 @@ from constructs import Construct
 
 THROTTLE_ERRORS = ["Lambda.TooManyRequestsException"]
 APPROVAL_TIMEOUT = Duration.hours(72)
+# How long an approval may stay pending before the approver is reminded.
+REMINDER_AFTER = Duration.hours(60)
 CONDITIONAL_CHECK_FAILED = ["DynamoDB.ConditionalCheckFailedException"]
 DYNAMODB_TRANSIENT_ERRORS = [
     "DynamoDB.ProvisionedThroughputExceededException",
@@ -66,7 +69,7 @@ def _paths(**paths: str) -> dict[str, str]:
 class ApprovalBranch:
     """Builds the states that follow ``HasCandidates`` when a run needs approval."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - one keyword argument per thing the branch drives
         self,
         scope: Construct,
         *,
@@ -74,10 +77,12 @@ class ApprovalBranch:
         executor: lambda_.IFunction,
         table_name: str,
         notify_failure: sfn.IChainable,
+        reminder: sfn.IStateMachine,
     ) -> None:
         self._scope = scope
         self._notifier = notifier
         self._executor = executor
+        self._reminder = reminder
         self._table_name = table_name
         self._notify_failure = notify_failure
         self._partition = Stack.of(scope).partition
@@ -113,6 +118,26 @@ class ApprovalBranch:
             retry_on_service_exceptions=True,
         )
         add_throttle_retry(request_approval)
+        # Fire and forget (no ".sync"): the reminder outlives this state by
+        # design. Failing to start it must not stop the approval request, so
+        # every error carries on to RequestApproval.
+        start_reminder = tasks.StepFunctionsStartExecution(
+            self._scope,
+            "StartReminder",
+            state_machine=self._reminder,
+            integration_pattern=sfn.IntegrationPattern.REQUEST_RESPONSE,
+            input=sfn.TaskInput.from_object(
+                {
+                    "approvalId": sfn.JsonPath.string_at(APPROVAL_ID),
+                    "runId": sfn.JsonPath.string_at("$.detect.runId"),
+                    "waitSeconds": REMINDER_AFTER.to_seconds(),
+                }
+            ),
+            result_path=sfn.JsonPath.DISCARD,
+        )
+        start_reminder.add_catch(
+            request_approval, errors=[sfn.Errors.ALL], result_path="$.reminderError"
+        )
         request_approval.add_catch(
             record_expired, errors=[sfn.Errors.TIMEOUT], result_path="$.error"
         )
@@ -154,7 +179,12 @@ class ApprovalBranch:
         )
         self._continue_to(record_applied, notify_result)
 
-        return new_approval_id.next(request_approval).next(apply).next(record_applied)
+        return (
+            new_approval_id.next(start_reminder)
+            .next(request_approval)
+            .next(apply)
+            .next(record_applied)
+        )
 
     def _outcome(self, outcome: str, status: str, *, mode: str) -> sfn.CustomState:
         """``Record<outcome>`` -> ``Mirror<outcome>`` -> ``Notify<outcome>`` -> ``<outcome>``."""

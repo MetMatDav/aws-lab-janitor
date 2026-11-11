@@ -1965,6 +1965,137 @@
       },
       "Type": "AWS::CloudWatch::Alarm"
     },
+    "WorkflowReminderStateMachineD761D780": {
+      "DeletionPolicy": "Delete",
+      "DependsOn": [
+        "WorkflowReminderStateMachineRoleDefaultPolicyA181ED94",
+        "WorkflowReminderStateMachineRoleCB9F79CF"
+      ],
+      "Properties": {
+        "DefinitionString": {
+          "Fn::Join": [
+            "",
+            [
+              "{\"StartAt\":\"Wait\",\"States\":{\"Wait\":{\"Type\":\"Wait\",\"SecondsPath\":\"$.waitSeconds\",\"Next\":\"Remind\"},\"Remind\":{\"Next\":\"Reminded\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Type\":\"Task\",\"Resource\":\"",
+              {
+                "Fn::GetAtt": [
+                  "NotifierFunctionAF3DBB87",
+                  "Arn"
+                ]
+              },
+              "\",\"Parameters\":{\"mode\":\"reminder\",\"approvalId.$\":\"$.approvalId\"}},\"Reminded\":{\"Type\":\"Succeed\"}},\"TimeoutSeconds\":219600}"
+            ]
+          ]
+        },
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "WorkflowReminderStateMachineRoleCB9F79CF",
+            "Arn"
+          ]
+        },
+        "StateMachineType": "STANDARD",
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::StepFunctions::StateMachine",
+      "UpdateReplacePolicy": "Delete"
+    },
+    "WorkflowReminderStateMachineRoleCB9F79CF": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "ArnLike": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":states:us-east-1:123456789012:stateMachine:*"
+                      ]
+                    ]
+                  }
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": "123456789012"
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "states.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Role"
+    },
+    "WorkflowReminderStateMachineRoleDefaultPolicyA181ED94": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "lambda:InvokeFunction",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "NotifierFunctionAF3DBB87",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "NotifierFunctionAF3DBB87",
+                          "Arn"
+                        ]
+                      },
+                      ":*"
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "WorkflowReminderStateMachineRoleDefaultPolicyA181ED94",
+        "Roles": [
+          {
+            "Ref": "WorkflowReminderStateMachineRoleCB9F79CF"
+          }
+        ]
+      },
+      "Type": "AWS::IAM::Policy"
+    },
     "WorkflowScheduleF6749A87": {
       "Properties": {
         "Description": "Starts the lab janitor every Monday",
@@ -2068,7 +2199,15 @@
                   "Arn"
                 ]
               },
-              "\",\"Payload\":{\"mode\":\"approval\",\"taskToken.$\":\"$$.Task.Token\",\"approvalId.$\":\"$.approvalRequest.approvalId\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\"}}},\"NewApprovalId\":{\"Type\":\"Pass\",\"ResultPath\":\"$.approvalRequest\",\"Parameters\":{\"approvalId.$\":\"States.UUID()\"},\"Next\":\"RequestApproval\"},\"Apply\":{\"Next\":\"RecordApplied\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":\"$.apply\",\"Resource\":\"",
+              "\",\"Payload\":{\"mode\":\"approval\",\"taskToken.$\":\"$$.Task.Token\",\"approvalId.$\":\"$.approvalRequest.approvalId\",\"detect.$\":\"$.detect\",\"config.$\":\"$.config\"}}},\"StartReminder\":{\"Next\":\"RequestApproval\",\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.reminderError\",\"Next\":\"RequestApproval\"}],\"Type\":\"Task\",\"ResultPath\":null,\"Resource\":\"arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":states:::states:startExecution\",\"Parameters\":{\"Input\":{\"approvalId.$\":\"$.approvalRequest.approvalId\",\"runId.$\":\"$.detect.runId\",\"waitSeconds\":216000},\"StateMachineArn\":\"",
+              {
+                "Ref": "WorkflowReminderStateMachineD761D780"
+              },
+              "\"}},\"NewApprovalId\":{\"Type\":\"Pass\",\"ResultPath\":\"$.approvalRequest\",\"Parameters\":{\"approvalId.$\":\"States.UUID()\"},\"Next\":\"StartReminder\"},\"Apply\":{\"Next\":\"RecordApplied\",\"Retry\":[{\"ErrorEquals\":[\"Lambda.ClientExecutionTimeoutException\",\"Lambda.ServiceException\",\"Lambda.AWSLambdaException\",\"Lambda.SdkClientException\"],\"IntervalSeconds\":2,\"MaxAttempts\":6,\"BackoffRate\":2},{\"ErrorEquals\":[\"Lambda.TooManyRequestsException\"],\"IntervalSeconds\":30,\"MaxAttempts\":5,\"BackoffRate\":2}],\"Catch\":[{\"ErrorEquals\":[\"States.ALL\"],\"ResultPath\":\"$.error\",\"Next\":\"NotifyFailure\"}],\"Type\":\"Task\",\"ResultPath\":\"$.apply\",\"Resource\":\"",
               {
                 "Fn::GetAtt": [
                   "ExecutorFunction90B119DB",
@@ -2278,6 +2417,13 @@
               "Effect": "Allow",
               "Resource": {
                 "Ref": "NotificationsAlertsTopicDFE3487E"
+              }
+            },
+            {
+              "Action": "states:StartExecution",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "WorkflowReminderStateMachineD761D780"
               }
             },
             {

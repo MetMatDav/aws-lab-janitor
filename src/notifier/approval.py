@@ -44,17 +44,25 @@ def _iam_lines(approval_url: str, approval_id: str) -> list[str]:
     return ["Approve with your AWS identity:", f"{command} approve", f"{command} reject"]
 
 
-def approval_message(
-    record: ApprovalRecord, summary: dict, approval_url: str, auth: str, confirmation: str
-) -> str:
-    """The approval email body for the ``link``, ``iam`` or ``both`` approval modes."""
+def decision_sections(
+    approval_url: str, approval_id: str, auth: str, confirmation: str
+) -> list[list[str]]:
+    """How to decide, as blocks of lines: the link block, the IAM block, or both."""
     if auth not in AUTH_MODES:
         raise ValueError(f"unknown approval auth mode: {auth}")
     sections = []
     if auth in ("link", "both"):
-        sections.append(_link_lines(approval_url, record.approval_id, confirmation))
+        sections.append(_link_lines(approval_url, approval_id, confirmation))
     if auth in ("iam", "both"):
-        sections.append(_iam_lines(approval_url, record.approval_id))
+        sections.append(_iam_lines(approval_url, approval_id))
+    return sections
+
+
+def approval_message(
+    record: ApprovalRecord, summary: dict, approval_url: str, auth: str, confirmation: str
+) -> str:
+    """The approval email body for the ``link``, ``iam`` or ``both`` approval modes."""
+    sections = decision_sections(approval_url, record.approval_id, auth, confirmation)
     return "\n\n".join(
         "\n".join(lines)
         for lines in [

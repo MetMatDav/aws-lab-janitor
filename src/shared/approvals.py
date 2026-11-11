@@ -158,6 +158,31 @@ class ApprovalStore:
                 raise
             raise AlreadyDecidedError(short_hash(approval_id)) from error
 
+    def mark_reminded(self, approval_id: str, now: str) -> ApprovalRecord | None:
+        """Stamp ``remindedAt`` on a PENDING, unexpired approval that has no reminder yet.
+
+        Returns the record when this call claimed the reminder, ``None`` when
+        there is nothing to remind about: the approval was decided, it
+        expired, or a reminder already went out. The status does not change.
+        """
+        try:
+            response = self._ddb.update_item(
+                TableName=self._table,
+                Key=self._key(approval_id),
+                UpdateExpression="SET remindedAt = :now",
+                ConditionExpression=(
+                    "#s = :pending AND expiresAt > :now AND attribute_not_exists(remindedAt)"
+                ),
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues=serialize({":now": now, ":pending": PENDING}),
+                ReturnValues="ALL_NEW",
+            )
+        except ClientError as error:
+            if not _is_conditional_failure(error):
+                raise
+            return None
+        return ApprovalRecord.from_item(deserialize(response["Attributes"]))
+
     def claim(self, approval_id: str, now: str, approver: dict) -> str:
         """Move a PENDING, unexpired approval to DECIDING for ``approver``.
 

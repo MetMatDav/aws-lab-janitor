@@ -351,3 +351,16 @@ def test_request_approval_retry_refreshes_the_token_and_republishes(stubs, caplo
     assert "existing approval request refreshed" in caplog.text
     assert APPROVAL_ID not in caplog.text
     assert TASK_TOKEN not in caplog.text
+
+
+def test_decision_sections_rejects_unknown_auth():
+    with pytest.raises(ValueError, match="unknown approval auth mode: sms"):
+        approval.decision_sections(APPROVAL_URL, APPROVAL_ID, "sms", "abc1")
+
+
+def test_decision_sections_follow_the_auth_mode():
+    link = approval.decision_sections(APPROVAL_URL, APPROVAL_ID, "link", "abc1")
+    both = approval.decision_sections(APPROVAL_URL, APPROVAL_ID, "both", "abc1")
+
+    assert ["\n".join(lines) for lines in link] == [link_block()]
+    assert ["\n".join(lines) for lines in both] == [link_block(), iam_block()]

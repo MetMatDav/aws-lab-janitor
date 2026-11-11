@@ -121,34 +121,64 @@ def approval_statements(template: assertions.Template) -> list[dict]:
     return role_statements(template, APPROVAL_HANDLER)
 
 
-def state_machine_id(template: assertions.Template) -> str:
-    """Logical id of the only state machine in the template."""
-    machines = template.find_resources("AWS::StepFunctions::StateMachine")
-    assert len(machines) == 1, "expected exactly one state machine"
-    (logical_id,) = machines
-    return logical_id
-
-
-def state_machine_role_id(template: assertions.Template) -> str:
-    """Logical id of the state machine's execution role."""
-    machine = template.find_resources("AWS::StepFunctions::StateMachine")[
-        state_machine_id(template)
-    ]
-    return machine["Properties"]["RoleArn"]["Fn::GetAtt"][0]
-
-
-def state_machine_definition(template: assertions.Template) -> dict:
-    """The state machine definition as a dict.
+def _definition(machine: dict) -> dict:
+    """A state machine resource's definition as a dict.
 
     The ``DefinitionString`` is an ``Fn::Join``; every non-string part (a
     ``Ref`` or ``Fn::GetAtt`` to an ARN) is replaced by the literal ``"X"``
     before the joined string is parsed.
     """
-    machine = template.find_resources("AWS::StepFunctions::StateMachine")[
-        state_machine_id(template)
-    ]
     definition = machine["Properties"]["DefinitionString"]
     if isinstance(definition, str):
         return json.loads(definition)
     parts = definition["Fn::Join"][1]
     return json.loads("".join(part if isinstance(part, str) else "X" for part in parts))
+
+
+def _machine_with_state(template: assertions.Template, state: str) -> str:
+    """Logical id of the only state machine whose definition has a state named ``state``."""
+    machines = template.find_resources("AWS::StepFunctions::StateMachine")
+    matches = [
+        logical_id
+        for logical_id, machine in machines.items()
+        if state in _definition(machine)["States"]
+    ]
+    assert len(matches) == 1, f"expected exactly one state machine with a {state} state"
+    return matches[0]
+
+
+def state_machine_id(template: assertions.Template) -> str:
+    """Logical id of the weekly state machine (the one with the ``Detect`` state)."""
+    return _machine_with_state(template, "Detect")
+
+
+def reminder_machine_id(template: assertions.Template) -> str:
+    """Logical id of the approval reminder state machine (the one with the ``Remind`` state)."""
+    return _machine_with_state(template, "Remind")
+
+
+def _machine_role_id(template: assertions.Template, machine_id: str) -> str:
+    machine = template.find_resources("AWS::StepFunctions::StateMachine")[machine_id]
+    return machine["Properties"]["RoleArn"]["Fn::GetAtt"][0]
+
+
+def state_machine_role_id(template: assertions.Template) -> str:
+    """Logical id of the weekly state machine's execution role."""
+    return _machine_role_id(template, state_machine_id(template))
+
+
+def reminder_role_id(template: assertions.Template) -> str:
+    """Logical id of the reminder state machine's execution role."""
+    return _machine_role_id(template, reminder_machine_id(template))
+
+
+def state_machine_definition(template: assertions.Template) -> dict:
+    """The weekly state machine's definition as a dict."""
+    machines = template.find_resources("AWS::StepFunctions::StateMachine")
+    return _definition(machines[state_machine_id(template)])
+
+
+def reminder_definition(template: assertions.Template) -> dict:
+    """The reminder state machine's definition as a dict."""
+    machines = template.find_resources("AWS::StepFunctions::StateMachine")
+    return _definition(machines[reminder_machine_id(template)])

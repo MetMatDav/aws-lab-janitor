@@ -10,6 +10,7 @@ from tests.infra.helpers import (
     EXECUTOR_HANDLER,
     NOTIFIER_HANDLER,
     actions,
+    reminder_machine_id,
     render,
     resources,
     role_statements,
@@ -26,6 +27,7 @@ STATE_NAMES = {
     "HasCandidates",
     "NotifyReportOnly",
     "NewApprovalId",
+    "StartReminder",
     "RequestApproval",
     "RecordRejected",
     "MirrorRejected",
@@ -177,7 +179,35 @@ def test_new_approval_id_uses_states_uuid(template: assertions.Template):
     assert state["Type"] == "Pass"
     assert state["Parameters"] == {"approvalId.$": "States.UUID()"}
     assert state["ResultPath"] == "$.approvalRequest"
+    assert state["Next"] == "StartReminder"
+
+
+def test_start_reminder_is_fire_and_forget(template: assertions.Template):
+    state = state_machine_definition(template)["States"]["StartReminder"]
+    assert state["Type"] == "Task"
+    # No ".sync": the weekly run does not wait for the 60 hour reminder.
+    assert state["Resource"].endswith(":states:::states:startExecution")
+    assert state["Parameters"]["Input"] == {
+        "approvalId.$": "$.approvalRequest.approvalId",
+        "runId.$": "$.detect.runId",
+        "waitSeconds": 60 * 3600,
+    }
+    assert state["ResultPath"] is None
     assert state["Next"] == "RequestApproval"
+    # A reminder that cannot be started must never block the approval request.
+    assert state["Catch"] == [
+        {"ErrorEquals": ["States.ALL"], "ResultPath": "$.reminderError", "Next": "RequestApproval"}
+    ]
+
+
+def test_start_reminder_targets_the_reminder_machine(template: assertions.Template):
+    parts = _raw_definition_parts(template)
+    marker = '"StartReminder":{'
+    start = next(i for i, part in enumerate(parts) if isinstance(part, str) and marker in part)
+    target = next(
+        part for part in parts[start + 1 :] if "Ref" in part and "AWS::" not in part["Ref"]
+    )
+    assert target == {"Ref": reminder_machine_id(template)}
 
 
 def test_request_approval_waits_for_task_token_with_72h_timeout(template: assertions.Template):

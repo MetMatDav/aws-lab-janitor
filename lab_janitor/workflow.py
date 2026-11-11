@@ -18,6 +18,7 @@ from lab_janitor.executor import Executor
 from lab_janitor.nag import OBSERVABILITY_REASON, acknowledge, wildcard_resource_finding
 from lab_janitor.notifications import Notifications
 from lab_janitor.notifier import Notifier
+from lab_janitor.reminder import ApprovalReminder
 from lab_janitor.workflow_approval import APPROVAL_TIMEOUT, ApprovalBranch, add_throttle_retry
 
 ALARM_PERIOD = Duration.minutes(5)
@@ -38,7 +39,9 @@ class Workflow(Construct):
     ``NotifyReportOnly``, which emails the report. Otherwise the approval
     branch (``lab_janitor.workflow_approval``) asks for approval and applies,
     rejects or expires the plan. Any task failure is published to the alerts
-    topic before the execution fails.
+    topic before the execution fails. The approval branch also starts the
+    reminder state machine (``lab_janitor.reminder``), exposed here as
+    ``reminder_machine``.
     """
 
     def __init__(  # noqa: PLR0913 - construct props are keyword-only dependencies
@@ -56,6 +59,9 @@ class Workflow(Construct):
     ) -> None:
         super().__init__(scope, construct_id)
 
+        self.reminder_machine = ApprovalReminder(
+            self, "Reminder", notifier=notifier.function
+        ).state_machine
         self.state_machine = self._state_machine(
             config=config,
             detector=detector,
@@ -144,6 +150,7 @@ class Workflow(Construct):
             executor=executor.function,
             table_name=audit.table.table_name,
             notify_failure=notify_failure,
+            reminder=self.reminder_machine,
         ).build()
         has_candidates = (
             sfn.Choice(self, "HasCandidates")
