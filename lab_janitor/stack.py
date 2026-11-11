@@ -16,6 +16,7 @@ from lab_janitor.executor import Executor
 from lab_janitor.nag import acknowledge
 from lab_janitor.notifications import Notifications
 from lab_janitor.notifier import Notifier
+from lab_janitor.trail import AuditTrail
 from lab_janitor.workflow import Workflow
 
 DESCRIPTION = "Lab janitor: weekly sweep of lab leftovers with plan, approval and audit trail"
@@ -26,7 +27,8 @@ class LabJanitorStack(Stack):
     """Weekly sweeper for lab leftovers.
 
     Composes the shared dead-letter queue, the notification topics, the audit
-    store, the detector that writes the weekly plan, the notifier that emails
+    store and the trail that records writes to it, the detector that writes
+    the weekly plan, the notifier that emails
     the report and the approval request, the approval endpoint, the executor
     that applies an approved plan, the scheduled workflow that ties them
     together, and the alarms that watch all of it.
@@ -59,6 +61,12 @@ class LabJanitorStack(Stack):
         )
         self.notifications = Notifications(self, "Notifications", config=self.config, dlq=self.dlq)
         self.audit = AuditStore(self, "Audit")
+        # createTrail=none leaves CloudTrail to whoever owns the account.
+        self.trail = (
+            None
+            if self.config.create_trail == "none"
+            else AuditTrail(self, "Trail", mode=self.config.create_trail, audit=self.audit)
+        )
 
         # One asset for every janitor function: each handler lives in its own
         # package under src/ and they all share src/shared.
@@ -108,6 +116,8 @@ class LabJanitorStack(Stack):
         CfnOutput(self, "PlansBucketName", value=self.audit.plans_bucket.bucket_name)
         CfnOutput(self, "AuditTableName", value=self.audit.table.table_name)
         CfnOutput(self, "ApprovalApiUrl", value=self.approval_api.url)
+        if self.trail is not None:
+            CfnOutput(self, "TrailLogBucketName", value=self.trail.log_bucket.bucket_name)
 
         for key, value in STACK_TAGS.items():
             Tags.of(self).add(key, value)

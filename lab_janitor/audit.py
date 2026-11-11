@@ -70,7 +70,8 @@ class AuditStore(Construct):
             self.plans_bucket,
             {
                 "AwsSolutions::AwsSolutions-S1": (
-                    "Append-only versioned bucket; CloudTrail data events are added in Plan 3"
+                    "Append-only versioned bucket; object-level access is recorded by "
+                    "CloudTrail data events unless createTrail is none"
                 )
             },
         )

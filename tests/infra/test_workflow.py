@@ -572,10 +572,21 @@ def test_outputs_are_at_stack_level(template: assertions.Template):
         "PlansBucketName",
         "AuditTableName",
         "ApprovalApiUrl",
+        "TrailLogBucketName",
     }
     assert outputs["StateMachineArn"]["Value"] == {"Ref": state_machine_id(template)}
-    (bucket_id,) = template.find_resources("AWS::S3::Bucket")
+    # The plans bucket is the one with the plans/ lifecycle rule; the other
+    # bucket is the trail's log bucket.
+    (bucket_id,) = template.find_resources(
+        "AWS::S3::Bucket",
+        {
+            "Properties": {
+                "LifecycleConfiguration": {"Rules": [Match.object_like({"Prefix": "plans/"})]}
+            }
+        },
+    )
     assert outputs["PlansBucketName"]["Value"] == {"Ref": bucket_id}
+    assert outputs["TrailLogBucketName"]["Value"]["Ref"] != bucket_id
     assert outputs["AuditTableName"]["Value"] == {"Ref": _table_id(template)}
     (api_id,) = template.find_resources("AWS::ApiGatewayV2::Api")
     assert outputs["ApprovalApiUrl"]["Value"] == {"Fn::GetAtt": [api_id, "ApiEndpoint"]}

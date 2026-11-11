@@ -29,11 +29,22 @@ is the mailbox that receives the reports and alerts.
 - The account must have a `CDKToolkit` bootstrap stack. If it does not, run
   `npx cdk bootstrap` once for the account and region.
 
-## CloudTrail baseline
+## CloudTrail
 
-Check what CloudTrail already records before deploying, because Plan 3 adds
-CloudTrail data events for the plans bucket and must not create a second trail
-that duplicates management events.
+The plans bucket and the audit table are the janitor's evidence, and writes to
+them are CloudTrail data events, which no trail records unless asked. The stack
+can create a trail for them; `-c createTrail=<mode>` says how:
+
+- `full` (the default): for an account with no trail. A multi-region trail with
+  management events plus the two kinds of data events.
+- `dataEventsOnly`: for an account whose management events already go to a
+  trail (an organization trail, for example). Only the data events of
+  `plans/` in the plans bucket and of the audit table, so nothing is recorded,
+  or billed, twice.
+- `none`: no trail and no log bucket.
+
+Check what CloudTrail already records before the first deploy, so the stack
+does not create a second trail that duplicates management events.
 
 Example, facts recorded on 2026-11-03 (UTC) for the owner's account:
 
@@ -42,7 +53,7 @@ Example, facts recorded on 2026-11-03 (UTC) for the owner's account:
   multi-region and logs management events to the organization's log-archive
   bucket.
 - There are no CloudTrail Lake event data stores.
-- Therefore Plan 3 will deploy with `createTrail=dataEventsOnly`.
+- Therefore this account deploys with `-c createTrail=dataEventsOnly`.
 
 To check another account, from the console open CloudTrail, then Trails and
 Event data stores. From the command line:
@@ -53,6 +64,50 @@ python -c "import boto3; c = boto3.client('cloudtrail', region_name='us-east-1')
 
 `describe_trails` lists trails (look at `IsMultiRegionTrail` and
 `IsOrganizationTrail`); `list_event_data_stores` lists CloudTrail Lake stores.
+
+Cost: data events are billed per event (USD 0.10 per 100,000 at the time of
+writing). A weekly run writes a few dozen items and two objects. In `full` mode
+the first copy of management events in a region is free; a second trail that
+also logs them is not, which is what `dataEventsOnly` avoids.
+
+The trail delivers gzipped JSON files to the `TrailLogBucketName` output, under
+`AWSLogs/<account-id>/CloudTrail/<region>/yyyy/mm/dd/`, usually within 5 to 15
+minutes. The bucket keeps 400 days, accepts writes from this trail only and is
+retained when the stack is deleted. To print the data events of one day that
+mention a run id (no Athena needed):
+
+```
+python - <<'PY'
+import boto3, gzip, json
+bucket, account, day, run_id = "<TrailLogBucketName>", "<account-id>", "2026/11/11", "<runId>"
+s3 = boto3.client("s3", region_name="us-east-1")
+prefix = f"AWSLogs/{account}/CloudTrail/us-east-1/{day}/"
+for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+    for obj in page.get("Contents", []):
+        body = s3.get_object(Bucket=bucket, Key=obj["Key"])["Body"].read()
+        for record in json.loads(gzip.decompress(body))["Records"]:
+            if run_id in json.dumps(record.get("requestParameters")):
+                who = record["userIdentity"].get("arn", "").rsplit("/", 1)[-1]
+                arns = [r.get("ARN") for r in record.get("resources", [])]
+                print(record["eventTime"], record["eventName"], who, arns)
+PY
+```
+
+Each line is one write: the detector's `PutObject` of the plan and report and
+its `PutItem` calls, the notifier's and the state machine's writes to the
+approval record, and the executor's `PutItem` per outcome. The `who` column is
+the role session name, which for a Lambda function is the function name.
+
+The deletions themselves (`DeleteSnapshot`, `DeleteVolume`, `ReleaseAddress`,
+`DeleteDashboards`, `DeleteMonitor`) are management events. Event history keeps
+90 days of them with no trail at all:
+
+```
+python -c "import boto3; c = boto3.client('cloudtrail', region_name='us-east-1'); [print(e['EventTime'], e['EventName'], [r.get('ResourceName') for r in e.get('Resources', [])]) for e in c.lookup_events(LookupAttributes=[{'AttributeKey': 'Username', 'AttributeValue': '<executor function name>'}])['Events']]"
+```
+
+Run it in the region where the resource lived. `DeleteDashboards` is recorded
+in us-east-1.
 
 ## Account quotas
 
@@ -99,6 +154,8 @@ Approval settings are context values too (all optional):
 - `approvalAuth`: `link` (default), `iam` or `both`; see [Approval flow](#approval-flow).
 - `approverRoleArn`: IAM role ARN allowed to decide through the IAM route;
   required by `iam` and `both`.
+- `createTrail`: `full` (default), `dataEventsOnly` or `none`; see
+  [CloudTrail](#cloudtrail).
 - `allowedRegions`: comma-separated regions the executor may delete in; empty
   means every region. When set it must include `us-east-1`, because the
   executor calls the CloudWatch dashboard API through us-east-1; without it

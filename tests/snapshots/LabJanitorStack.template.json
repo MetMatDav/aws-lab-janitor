@@ -23,6 +23,11 @@
       "Value": {
         "Ref": "WorkflowStateMachine8F1B1C15"
       }
+    },
+    "TrailLogBucketName": {
+      "Value": {
+        "Ref": "TrailLogBucket27411DF0"
+      }
     }
   },
   "Parameters": {
@@ -2262,6 +2267,269 @@
         ]
       },
       "Type": "AWS::IAM::Policy"
+    },
+    "Trail8987F129": {
+      "DependsOn": [
+        "TrailLogBucketPolicy65A6BA86"
+      ],
+      "Properties": {
+        "AdvancedEventSelectors": [
+          {
+            "FieldSelectors": [
+              {
+                "Equals": [
+                  "Management"
+                ],
+                "Field": "eventCategory"
+              }
+            ],
+            "Name": "Management events"
+          },
+          {
+            "FieldSelectors": [
+              {
+                "Equals": [
+                  "Data"
+                ],
+                "Field": "eventCategory"
+              },
+              {
+                "Equals": [
+                  "AWS::S3::Object"
+                ],
+                "Field": "resources.type"
+              },
+              {
+                "Field": "resources.ARN",
+                "StartsWith": [
+                  {
+                    "Fn::Join": [
+                      "",
+                      [
+                        {
+                          "Fn::GetAtt": [
+                            "AuditPlansBucketDEC41664",
+                            "Arn"
+                          ]
+                        },
+                        "/plans/"
+                      ]
+                    ]
+                  }
+                ]
+              }
+            ],
+            "Name": "Plan objects"
+          },
+          {
+            "FieldSelectors": [
+              {
+                "Equals": [
+                  "Data"
+                ],
+                "Field": "eventCategory"
+              },
+              {
+                "Equals": [
+                  "AWS::DynamoDB::Table"
+                ],
+                "Field": "resources.type"
+              },
+              {
+                "Equals": [
+                  {
+                    "Fn::GetAtt": [
+                      "AuditTable18A3095C",
+                      "Arn"
+                    ]
+                  }
+                ],
+                "Field": "resources.ARN"
+              }
+            ],
+            "Name": "Audit table items"
+          }
+        ],
+        "EnableLogFileValidation": true,
+        "IncludeGlobalServiceEvents": true,
+        "IsLogging": true,
+        "IsMultiRegionTrail": true,
+        "S3BucketName": {
+          "Ref": "TrailLogBucket27411DF0"
+        },
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "TrailName": "LabJanitorStack-audit"
+      },
+      "Type": "AWS::CloudTrail::Trail"
+    },
+    "TrailLogBucket27411DF0": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpirationInDays": 400,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 30
+              },
+              "Status": "Enabled"
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "Tags": [
+          {
+            "Key": "ManagedBy",
+            "Value": "cdk"
+          },
+          {
+            "Key": "Project",
+            "Value": "aws-lab-janitor"
+          }
+        ],
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "TrailLogBucketPolicy65A6BA86": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "TrailLogBucket27411DF0"
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "TrailLogBucket27411DF0",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "TrailLogBucket27411DF0",
+                          "Arn"
+                        ]
+                      },
+                      "/*"
+                    ]
+                  ]
+                }
+              ]
+            },
+            {
+              "Action": "s3:GetBucketAcl",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":cloudtrail:us-east-1:123456789012:trail/LabJanitorStack-audit"
+                      ]
+                    ]
+                  }
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudtrail.amazonaws.com"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "TrailLogBucket27411DF0",
+                  "Arn"
+                ]
+              },
+              "Sid": "CloudTrailAclCheck"
+            },
+            {
+              "Action": "s3:PutObject",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceArn": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition"
+                        },
+                        ":cloudtrail:us-east-1:123456789012:trail/LabJanitorStack-audit"
+                      ]
+                    ]
+                  },
+                  "s3:x-amz-acl": "bucket-owner-full-control"
+                }
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudtrail.amazonaws.com"
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "TrailLogBucket27411DF0",
+                        "Arn"
+                      ]
+                    },
+                    "/AWSLogs/123456789012/*"
+                  ]
+                ]
+              },
+              "Sid": "CloudTrailWrite"
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      },
+      "Type": "AWS::S3::BucketPolicy"
     },
     "WorkflowReminderStateMachineD761D780": {
       "DeletionPolicy": "Delete",

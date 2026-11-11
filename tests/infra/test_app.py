@@ -58,5 +58,6 @@ def test_cli_outputs_are_stack_level_and_carry_no_email(cli_template: dict):
         "PlansBucketName",
         "AuditTableName",
         "ApprovalApiUrl",
+        "TrailLogBucketName",
     }
     assert "@" not in json.dumps(outputs)

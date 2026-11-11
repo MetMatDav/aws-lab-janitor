@@ -75,3 +75,17 @@ def cli_assembly(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def cli_template(cli_assembly: Path) -> dict:
     """The CloudFormation template from ``cli_assembly``, as a dict."""
     return json.loads((cli_assembly / "LabJanitorStack.template.json").read_text())
+
+
+@pytest.fixture(scope="session")
+def data_only_template() -> assertions.Template:
+    """Template for an account that already has a trail: ``createTrail=dataEventsOnly``."""
+    app = cdk.App(context={"reportEmail": "test@example.com", "createTrail": "dataEventsOnly"})
+    return assertions.Template.from_stack(LabJanitorStack(app, "LabJanitorStack", env=ENV))
+
+
+@pytest.fixture(scope="session")
+def no_trail_template() -> assertions.Template:
+    """Template synthesized with ``createTrail=none``."""
+    app = cdk.App(context={"reportEmail": "test@example.com", "createTrail": "none"})
+    return assertions.Template.from_stack(LabJanitorStack(app, "LabJanitorStack", env=ENV))
