@@ -15,6 +15,7 @@ from shared.approvals import (
 )
 from shared.plan_store import PlanIntegrityError, plan_key
 from shared.plan_summary import render_summary, summarize_plan
+from shared.report import count_noun
 
 logger = logging.getLogger("notifier")
 
@@ -26,7 +27,7 @@ CONFIRMATION_LENGTH = 4
 def approval_subject(summary: dict) -> str:
     """Email subject for an approval request; falls back to a fixed text if it would be too long."""
     subject = (
-        f"{SUBJECT_PREFIX}: {summary['candidateCount']} deletions, "
+        f"{SUBJECT_PREFIX}: {count_noun(summary['candidateCount'], 'deletion')}, "
         f"~${summary['estimatedMonthlyUsd']:.2f}/month, run {summary['runId']}"
     )
     return fit_subject(subject, SUBJECT_PREFIX)
@@ -67,7 +68,7 @@ def approval_message(
         "\n".join(lines)
         for lines in [
             [
-                f"Lab Janitor wants to delete {summary['candidateCount']} resources "
+                f"Lab Janitor wants to delete {count_noun(summary['candidateCount'], 'resource')} "
                 f"(~${summary['estimatedMonthlyUsd']:.2f}/month)."
             ],
             *sections,

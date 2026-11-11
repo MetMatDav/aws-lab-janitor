@@ -251,6 +251,18 @@ def test_claim_raises_already_decided_when_old_status_is_not_pending(ddb_stub):
     ddb_stub.assert_no_pending_responses()
 
 
+@pytest.mark.parametrize("status", ["EXPIRED", "APPROVED", "REJECTED", "DECIDING"])
+def test_claim_reports_the_status_it_lost_to(ddb_stub, status):
+    conditional_failure(ddb_stub, claim_params(), {**RECORD_ITEM, "status": {"S": status}})
+
+    with pytest.raises(AlreadyDecidedError) as raised:
+        store(ddb_stub).claim(APPROVAL_ID, NOW, APPROVER)
+
+    # The caller answers 410 for EXPIRED and 409 for the rest.
+    assert raised.value.status == status
+    assert APPROVAL_ID not in str(raised.value)
+
+
 def test_claim_raises_expired_when_old_status_is_pending(ddb_stub):
     conditional_failure(ddb_stub, claim_params(), RECORD_ITEM)
 

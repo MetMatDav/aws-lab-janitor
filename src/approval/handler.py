@@ -54,6 +54,11 @@ STATUS_PAGES = {
     409: ("Already decided", "This approval was already decided. Nothing changed."),
     410: ("Approval expired", "This approval expired. Nothing will be deleted for this run."),
     500: ("Something went wrong", "The decision was not recorded. Try again in a few minutes."),
+    504: (
+        "Decision status unknown",
+        "The decision may have been recorded. "
+        "Check the latest emails for this run before trying again.",
+    ),
 }
 WRONG_CONFIRMATION = "The confirmation code did not match. Nothing changed; go back and retry."
 ERROR_NAMES = {
@@ -63,6 +68,7 @@ ERROR_NAMES = {
     409: "already decided",
     410: "expired",
     500: "internal error",
+    504: "unknown outcome",
 }
 
 

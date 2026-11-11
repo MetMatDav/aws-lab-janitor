@@ -461,7 +461,7 @@
     "ApprovalApi8A7EAF8B": {
       "Properties": {
         "Description": "Lab janitor approval endpoint",
-        "Name": "Api",
+        "Name": "LabJanitorStack-approvals",
         "ProtocolType": "HTTP",
         "Tags": {
           "ManagedBy": "cdk",

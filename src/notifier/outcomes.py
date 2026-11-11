@@ -4,8 +4,9 @@ import json
 import logging
 import os
 
-from notifier.report import fit_subject
+from notifier.report import REPORT_EMAIL_LIMIT_BYTES, fit_subject
 from shared.plan_store import plan_key
+from shared.report import truncate_report
 
 logger = logging.getLogger("notifier")
 
@@ -60,15 +61,24 @@ def publish_result(event: dict) -> dict:
         f"{apply['failed']} failed, {apply['skipped']} skipped",
         RESULT_SUBJECT,
     )
-    items = [_item_line(item) for item in apply["items"]]
-    lines = [
+    head = [
         f"Run: {run_id}",
         f"Deleted: {apply['deleted']}  Failed: {apply['failed']}  Skipped: {apply['skipped']}",
         "",
-        *([*items, ""] if items else []),
+    ]
+    tail = [
         f"Approved by: {describe_approver(approver) if approver else UNKNOWN_APPROVER}",
         _plan_pointer(run_id),
     ]
+    items = "\n".join(_item_line(item) for item in apply["items"])
+    if items:
+        # A plan can hold thousands of items and SNS refuses a message over
+        # 256 KB. Only item lines are dropped: every outcome is in the audit table.
+        fixed = len("\n".join([*head, "", *tail]).encode()) + 1
+        items = truncate_report(
+            items, REPORT_EMAIL_LIMIT_BYTES - fixed, f"audit table items under RUN#{run_id}"
+        )
+    lines = [*head, *([items, ""] if items else []), *tail]
     return _publish(subject, "\n".join(lines), run_id)
 
 

@@ -7,6 +7,11 @@ ACCOUNT_CLEAN = "ACCOUNT CLEAN: no billable resources detected"
 TRUNCATION_SUFFIX = "\n... truncated, {omitted} lines omitted. Full report: {pointer}"
 
 
+def count_noun(count: int, noun: str) -> str:
+    """``1 deletion``, ``2 deletions``: the count with a regular English plural."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _one_line(text: str) -> str:
     """Collapse whitespace (including newlines) so free text never breaks a report line."""
     return " ".join(text.split())

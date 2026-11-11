@@ -283,3 +283,26 @@ def test_monitor_prefix_mismatch_and_gone(stub_factory, fake_clients):
     assert recheck(item("internet-monitor", "prod-mon"), fake_clients) == "name prefix mismatch"
     assert recheck(item("internet-monitor", "LAB-mon"), fake_clients) == "already-gone"
     monitor.assert_no_pending_responses()
+
+
+def test_snapshot_without_a_start_time_reads_age_unknown(stub_factory, fake_clients):
+    described = snapshot()
+    del described["StartTime"]
+    ec2 = stub_factory("ec2", REGION)
+    ec2.add_response("describe_snapshots", {"Snapshots": [described]}, {"SnapshotIds": ["snap-1"]})
+
+    # Unknown is not "young": the reason must not read "below minimum age (None days)".
+    assert recheck(item("ebs-snapshot", "snap-1"), fake_clients) == "age unknown"
+    ec2.assert_no_pending_responses()
+
+
+def test_volume_without_a_create_time_reads_age_unknown(stub_factory, fake_clients):
+    ec2 = stub_factory("ec2", REGION)
+    ec2.add_response(
+        "describe_volumes",
+        {"Volumes": [{"VolumeId": "vol-1", "State": "available", "Tags": LAB}]},
+        {"VolumeIds": ["vol-1"]},
+    )
+
+    assert recheck(item("ebs-volume", "vol-1"), fake_clients) == "age unknown"
+    ec2.assert_no_pending_responses()

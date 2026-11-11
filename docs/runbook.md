@@ -340,6 +340,8 @@ JSON):
 | `404` | No such approval, or the route is not enabled by `approvalAuth`. |
 | `409` | Already decided. A second decision never changes the first. |
 | `410` | The approval expired (after the approval window: 71 h 30 min; the state machine waits 72 h). Nothing will be deleted for this run. |
+| `500` | The decision was not recorded: Step Functions refused the callback and the claim was put back to `PENDING`. Retry in a few minutes. |
+| `504` | Step Functions did not answer, so the decision may or may not have been delivered. The record stays `DECIDING` and every later attempt gets `409`. Look for the result or rejection email; if the run is still waiting after a few minutes, see [A decision left in DECIDING](#a-decision-left-in-deciding). |
 
 To follow one approval in the audit table (`AuditTableName`):
 
@@ -358,6 +360,27 @@ To follow one approval in the audit table (`AuditTableName`):
 python -c "import boto3; t = boto3.resource('dynamodb', region_name='us-east-1').Table('<AuditTableName>'); print(t.get_item(Key={'pk': 'APPROVAL#<approvalId>', 'sk': 'META'}).get('Item'))"
 ```
 
+### A decision left in DECIDING
+
+A `504` answer, or a Lambda that died between the callback and the final write,
+leaves the approval record in `DECIDING`. Nothing decides it again by itself,
+on purpose: a second callback racing an unknown first one would be worse than
+a manual step.
+
+First find out whether the decision arrived. Open the execution in Step
+Functions: if it moved past `RequestApproval`, the decision was delivered and
+the run carries on; the record only lags behind and needs nothing. If
+`RequestApproval` is still running, the callback was lost. Put the record back
+to `PENDING` from an administrator session and decide again from the email:
+
+```
+python -c "import boto3; boto3.client('dynamodb', region_name='us-east-1').update_item(TableName='<AuditTableName>', Key={'pk': {'S': 'APPROVAL#<approvalId>'}, 'sk': {'S': 'META'}}, UpdateExpression='SET #s = :pending REMOVE approvedBy', ConditionExpression='#s = :deciding', ExpressionAttributeNames={'#s': 'status'}, ExpressionAttributeValues={':pending': {'S': 'PENDING'}, ':deciding': {'S': 'DECIDING'}})"
+```
+
+The condition makes the reset fail if the record is no longer `DECIDING`. If
+the approval window closes first, the state machine marks it `EXPIRED` and the
+run ends without deleting anything.
+
 ## IAM approval
 
 `approvalAuth=iam` (or `both`) exposes `POST /iam/approvals/{id}`, signed with
@@ -375,8 +398,9 @@ aws sso login --sso-session <your-session>
   --profile <approver-profile> --region us-east-1
 ```
 
-Use `reject` instead of `approve` to refuse. `--profile` and `--region` default
-to your environment's. The script prints `status: <code>` and the JSON answer
+Use `reject` instead of `approve` to refuse. `--profile` defaults to your
+environment's; the request is signed for the region in the API URL unless
+`--region` says otherwise. The script prints `status: <code>` and the JSON answer
 (`{"status": "APPROVED"}` or `{"status": "REJECTED"}`), exits 0 on a 2xx
 answer and 1 otherwise, and refuses a URL that is not `https://`.
 

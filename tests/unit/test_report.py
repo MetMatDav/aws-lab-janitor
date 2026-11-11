@@ -4,7 +4,7 @@ import pytest
 
 from shared.findings import ErrorFinding, Finding
 from shared.plan import build_plan
-from shared.report import render_report, truncate_report
+from shared.report import count_noun, render_report, truncate_report
 from shared.settings import Settings
 
 NOW = datetime(2026, 11, 10, 14, 0, 12, tzinfo=UTC)
@@ -231,3 +231,11 @@ def test_truncate_counts_utf8_bytes():
 def test_truncate_raises_when_suffix_cannot_fit():
     with pytest.raises(ValueError):
         truncate_report("x" * 100, 10, "s3://b/k")
+
+
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [(0, "0 deletions"), (1, "1 deletion"), (2, "2 deletions"), (11, "11 deletions")],
+)
+def test_count_noun_uses_the_singular_only_for_one(count: int, expected: str):
+    assert count_noun(count, "deletion") == expected

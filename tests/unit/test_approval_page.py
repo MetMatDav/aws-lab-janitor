@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from approval import page
 from shared.approvals import ApprovalRecord
 
@@ -68,3 +70,17 @@ def test_done_page_names_the_decision():
     assert "approved" in page.render_done("approve").lower()
     assert "rejected" in page.render_done("reject").lower()
     assert "<form" not in page.render_done("approve")
+
+
+def test_form_headline_counts_one_resource_in_the_singular():
+    html = page.render_form(RECORD, "summary")
+
+    assert "Lab Janitor wants to delete 1 resource (~$32.85/month)." in html
+
+
+def test_form_headline_counts_several_resources_in_the_plural():
+    several = replace(RECORD, plan_summary={"candidateCount": 3, "estimatedMonthlyUsd": 1.0})
+
+    assert "Lab Janitor wants to delete 3 resources (~$1.00/month)." in page.render_form(
+        several, "summary"
+    )

@@ -21,6 +21,7 @@ GLOBAL_CLIENT_REGION = "us-east-1"
 ALREADY_GONE = "already-gone"
 NOT_LAB_TAGGED = "not-lab-tagged"
 NAME_PREFIX_MISMATCH = "name prefix mismatch"
+AGE_UNKNOWN = "age unknown"
 
 
 def client_for(clients, service: str, item: dict) -> BaseClient:
@@ -59,7 +60,10 @@ def _tag_blocker(tags: list[dict], settings: Settings) -> str | None:
 
 def _age_blocker(created: datetime | None, settings: Settings, now: datetime) -> str | None:
     age = age_days(created, now)
-    if age is None or age < settings.min_age_days:
+    if age is None:
+        # Fail closed, and say why: an unknown age is not a young resource.
+        return AGE_UNKNOWN
+    if age < settings.min_age_days:
         return f"below minimum age ({age} days)"
     return None
 
@@ -113,6 +117,9 @@ def _volume(item: dict, clients, settings: Settings, now: datetime) -> str | Non
 
 
 def _address(item: dict, clients, settings: Settings, _now: datetime) -> str | None:
+    """Tag and association only. The age is not re-checked here: an address has no
+    timestamp, its age comes from audit records of earlier live runs, and nothing
+    in the audit table can change between detection and apply."""
     ec2 = client_for(clients, "ec2", item)
     address = _describe_one(
         lambda: ec2.describe_addresses(AllocationIds=[item["resourceId"]])["Addresses"],

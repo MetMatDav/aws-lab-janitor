@@ -197,3 +197,10 @@ def test_notifier_receives_the_approval_url(template: assertions.Template):
     url = notifier["Properties"]["Environment"]["Variables"]["APPROVAL_URL"]
     # The API endpoint has no trailing slash, so the notifier appends "/approvals/<id>".
     assert url == {"Fn::GetAtt": [api_id, "ApiEndpoint"]}
+
+
+def test_api_is_named_after_the_stack(template: assertions.Template):
+    # "Api" told nobody which stack an API in the console belonged to.
+    template.has_resource_properties(
+        "AWS::ApiGatewayV2::Api", {"Name": "LabJanitorStack-approvals"}
+    )

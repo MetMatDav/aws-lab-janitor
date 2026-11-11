@@ -41,7 +41,16 @@ class ApprovalExistsError(ApprovalError):
 
 
 class AlreadyDecidedError(ApprovalError):
-    """The approval is no longer waiting for a decision."""
+    """The approval is no longer waiting for a decision.
+
+    ``status`` is the status the failed condition saw, when the store knows
+    it: callers answer differently for an approval that expired and for one
+    that somebody else decided.
+    """
+
+    def __init__(self, message: str, status: str | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class ExpiredError(ApprovalError):
@@ -205,8 +214,9 @@ class ApprovalStore:
             if not _is_conditional_failure(error):
                 raise
             old = error.response.get("Item")
-            if old is not None and deserialize(old).get("status") != PENDING:
-                raise AlreadyDecidedError(short_hash(approval_id)) from error
+            status = deserialize(old).get("status") if old is not None else None
+            if status is not None and status != PENDING:
+                raise AlreadyDecidedError(short_hash(approval_id), status) from error
             raise ExpiredError(short_hash(approval_id)) from error
         return DECIDING
 

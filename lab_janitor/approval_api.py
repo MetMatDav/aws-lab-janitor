@@ -1,7 +1,7 @@
 """The approval endpoint: an HTTP API in front of the approval handler."""
 
 import jsii
-from aws_cdk import Duration, RemovalPolicy
+from aws_cdk import Duration, RemovalPolicy, Stack
 from aws_cdk import aws_apigateway as apigateway
 from aws_cdk import aws_apigatewayv2 as apigw
 from aws_cdk import aws_apigatewayv2_authorizers as authorizers
@@ -123,6 +123,7 @@ class ApprovalApi(Construct):
         self.api = apigw.HttpApi(
             self,
             "Api",
+            api_name=f"{Stack.of(self).stack_name}-approvals",
             description="Lab janitor approval endpoint",
             create_default_stage=False,
         )

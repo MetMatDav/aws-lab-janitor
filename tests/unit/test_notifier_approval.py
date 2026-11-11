@@ -364,3 +364,27 @@ def test_decision_sections_follow_the_auth_mode():
 
     assert ["\n".join(lines) for lines in link] == [link_block()]
     assert ["\n".join(lines) for lines in both] == [link_block(), iam_block()]
+
+
+def test_subject_and_body_use_singular_for_one_candidate():
+    plan = make_plan()
+    plan["candidates"] = plan["candidates"][:1]
+    summary = summarize_plan(plan)
+    cost = f"~${summary['estimatedMonthlyUsd']:.2f}/month"
+
+    message = approval.approval_message(expected_record(), summary, APPROVAL_URL, "link", "abc1")
+
+    assert summary["candidateCount"] == 1
+    assert approval.approval_subject(summary) == (
+        f"[Lab Janitor] Approval needed: 1 deletion, {cost}, run {RUN_ID}"
+    )
+    assert message.splitlines()[0] == f"Lab Janitor wants to delete 1 resource ({cost})."
+
+
+def test_subject_and_body_keep_the_plural_for_two_candidates():
+    summary = summarize_plan(make_plan())
+
+    message = approval.approval_message(expected_record(), summary, APPROVAL_URL, "link", "abc1")
+
+    assert ": 2 deletions, " in approval.approval_subject(summary)
+    assert message.startswith("Lab Janitor wants to delete 2 resources (")

@@ -237,3 +237,43 @@ def test_rejected_never_raises_on_a_malformed_cause(sns, error):
     event = {"mode": "rejected", "detect": {"runId": RUN_ID}, "error": error}
 
     assert notifier.handler(event, None)["published"] is True
+
+
+def test_result_with_thousands_of_items_stays_under_the_email_limit(sns, monkeypatch):
+    # SNS rejects a message over 256 KB; that failure would come after the deletions.
+    items = [
+        {
+            "resourceId": f"snap-{index:017x}",
+            "kind": "ebs-snapshot",
+            "region": "us-east-1",
+            "outcome": "DELETED",
+            "reason": "deleted",
+        }
+        for index in range(5000)
+    ]
+    event = result_event(apply={"deleted": 5000, "failed": 0, "skipped": 0, "items": items})
+    published = []
+
+    def capture(**params):
+        published.append(params)
+        return {"MessageId": MESSAGE_ID}
+
+    monkeypatch.setattr(sns.client, "publish", capture)
+
+    assert notifier.handler(event, None) == {"published": True, "messageId": MESSAGE_ID}
+
+    (params,) = published
+    message = params["Message"]
+    lines = message.split("\n")
+    assert len(message.encode()) <= 150_000
+    # The head and the tail survive; only item lines are dropped.
+    assert lines[:2] == [f"Run: {RUN_ID}", "Deleted: 5000  Failed: 0  Skipped: 0"]
+    assert lines[3] == f"DELETED [ebs-snapshot] snap-{0:017x} (us-east-1): deleted"
+    assert lines[-2:] == [
+        "Approved by: link 203.0.113.7 Mozilla/5.0 at 2026-11-03T10:00:00+00:00",
+        POINTER,
+    ]
+    kept = [line for line in lines if line.startswith("DELETED [")]
+    notice = f"... truncated, {5000 - len(kept)} lines omitted. Full report: "
+    assert 0 < len(kept) < 5000
+    assert f"{notice}audit table items under RUN#{RUN_ID}" in message

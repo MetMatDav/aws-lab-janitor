@@ -7,6 +7,7 @@ so it posts back to the page's own URL (the CSP allows ``form-action 'self'``).
 from html import escape
 
 from shared.approvals import ApprovalRecord
+from shared.report import count_noun
 
 _STYLE = (
     "body{font-family:system-ui,sans-serif;max-width:52rem;margin:2rem auto;padding:0 1rem;"
@@ -40,7 +41,7 @@ def render_form(
     """The review page: plan facts, the candidate list and the decision form."""
     summary = record.plan_summary
     headline = (
-        f"Lab Janitor wants to delete {summary['candidateCount']} resources "
+        f"Lab Janitor wants to delete {count_noun(summary['candidateCount'], 'resource')} "
         f"(~${summary['estimatedMonthlyUsd']:.2f}/month)."
     )
     content = (

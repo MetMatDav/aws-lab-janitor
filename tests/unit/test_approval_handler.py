@@ -445,6 +445,20 @@ def test_second_post_is_409(deps):
     assert response["statusCode"] == 409
 
 
+def test_decision_on_a_just_expired_record_returns_410(deps):
+    """The state machine expired the approval between our read and our claim."""
+    ddb, _ = deps
+    stub_get(ddb, record_item())
+    stub_claim_failure(ddb, LINK_APPROVER, record_item(status="EXPIRED"))
+
+    response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    # 410, not 409: nobody decided, the window closed. No Step Functions call
+    # is stubbed, so resuming the execution would fail the test.
+    assert response["statusCode"] == 410
+    assert "Approval expired" in html_body(response)
+
+
 def test_post_on_expired_status_is_410_without_any_write(deps):
     ddb, _ = deps
     stub_get(ddb, record_item(status="EXPIRED"))
@@ -515,7 +529,7 @@ def test_post_refused_callback_reverts_and_500(deps, caplog, code):
     ]
 
 
-def test_post_callback_timeout_leaves_claim_deciding_and_500(deps, monkeypatch, caplog):
+def test_unknown_callback_outcome_returns_504_and_keeps_deciding(deps, monkeypatch, caplog):
     """A ``BotoCoreError`` may hide a delivered callback, so the record stays DECIDING."""
     ddb, sfn = deps
     stub_get(ddb, record_item())
@@ -533,12 +547,69 @@ def test_post_callback_timeout_leaves_claim_deciding_and_500(deps, monkeypatch, 
     with caplog.at_level(logging.INFO, logger="approval"):
         response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
 
-    assert response["statusCode"] == 500
+    # 504, not 500: "not recorded, try again" would be a lie here.
+    assert response["statusCode"] == 504
+    page = html_body(response)
+    assert "Decision status unknown" in page
+    assert "The decision may have been recorded." in page
     assert calls == [success_params(LINK_APPROVER)]
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert [r.getMessage() for r in errors] == [
         "decision callback outcome unknown (ReadTimeoutError), approval left DECIDING"
     ]
+
+
+def test_unknown_callback_outcome_on_the_iam_route_is_504_json(deps, monkeypatch):
+    ddb, sfn = deps
+    stub_get(ddb, record_item())
+    ddb.add_response("update_item", {}, claim_params(IAM_APPROVER))
+
+    def timed_out(**_params):
+        raise ReadTimeoutError(endpoint_url="https://states.us-east-1.amazonaws.com/")
+
+    monkeypatch.setattr(sfn.client, "send_task_success", timed_out)
+
+    response = call(
+        http_event(
+            "POST",
+            IAM_ROUTE,
+            APPROVAL_ID,
+            body=json.dumps({"decision": "approve"}),
+            iam_arn=SSO_CALLER_ARN,
+        )
+    )
+
+    assert response["statusCode"] == 504
+    assert json_body(response) == {"error": "unknown outcome"}
+
+
+def test_finalize_read_timeout_still_returns_200(deps, monkeypatch, caplog):
+    """The callback was delivered; a network error while recording it changes nothing."""
+    ddb, sfn = deps
+    stub_get(ddb, record_item())
+    ddb.add_response("update_item", {}, claim_params(LINK_APPROVER))
+    sfn.add_response("send_task_success", {}, success_params(LINK_APPROVER))
+    stubbed_update = ddb.client.update_item
+    updates = []
+
+    def claim_then_time_out(**params):
+        updates.append(params["UpdateExpression"])
+        if len(updates) == 1:
+            return stubbed_update(**params)
+        raise ReadTimeoutError(endpoint_url="https://dynamodb.us-east-1.amazonaws.com/")
+
+    # The Stubber cannot raise a BotoCoreError: the claim goes to the stub, finalize times out.
+    monkeypatch.setattr(ddb.client, "update_item", claim_then_time_out)
+
+    with caplog.at_level(logging.INFO, logger="approval"):
+        response = call(http_event("POST", GET_ROUTE, APPROVAL_ID, body=form()))
+
+    assert response["statusCode"] == 200
+    assert "Plan approved" in html_body(response)
+    assert updates == ["SET #s = :deciding, approvedBy = :by", "SET #s = :status, decidedAt = :at"]
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors == ["decision delivered but the approval was not finalized (ReadTimeoutError)"]
+    assert APPROVAL_ID not in caplog.text
 
 
 def test_post_finalize_store_error_after_delivered_decision_is_still_200(deps, caplog):

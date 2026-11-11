@@ -6,12 +6,17 @@ status and the JSON answer. Exit code 0 means the API answered 2xx.
 
     python scripts/approve.py --url https://<api-id>.execute-api.<region>.amazonaws.com \\
         <approvalId> approve|reject [--profile P] [--region R]
+
+The request is signed for the region in the API's host name. ``--region``
+overrides it; a custom domain falls back to the profile's region.
 """
 
 import argparse
 import json
+import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import boto3
@@ -22,6 +27,17 @@ from botocore.exceptions import BotoCoreError
 SERVICE = "execute-api"
 TIMEOUT_SECONDS = 30
 HTTP_OK_LOW, HTTP_OK_HIGH = 200, 300
+_API_HOST = re.compile(r"[a-z0-9]+\.execute-api\.([a-z0-9-]+)\.amazonaws\.com(\.cn)?", re.ASCII)
+
+
+def region_from_url(url: str) -> str | None:
+    """The region in an ``execute-api`` host name, or ``None`` for any other host.
+
+    A request signed for another region is refused with 403, which reads like
+    a permissions problem; the URL already says where the API lives.
+    """
+    match = _API_HOST.fullmatch(urllib.parse.urlsplit(url).hostname or "")
+    return match.group(1) if match else None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,7 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("approval_id", help="the approval id from the approval email")
     parser.add_argument("decision", choices=("approve", "reject"))
     parser.add_argument("--profile", help="AWS profile whose role is the configured approver")
-    parser.add_argument("--region", help="region of the API; defaults to the profile's region")
+    parser.add_argument(
+        "--region", help="signing region; defaults to the one in --url, then the profile's"
+    )
     return parser
 
 
@@ -79,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     except BotoCoreError as error:  # unknown profile, expired SSO token
         print(f"error: {error}\nIf the SSO session expired, run: aws sso login", file=sys.stderr)
         return 1
-    region = session.region_name
+    region = args.region or region_from_url(args.url) or session.region_name
     if frozen is None or region is None:
         print("error: no AWS credentials or region; use --profile and --region", file=sys.stderr)
         return 1
