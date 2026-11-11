@@ -230,8 +230,9 @@ inventory.
 A run asks for approval only when it is not a dry run (`"dryRun": false` in the
 execution input, or a stack deployed with `-c dryRun=false`) and the detector
 found at least one candidate. The state path is `Defaults`, `Normalize`,
-`Detect`, `HasCandidates`, `NewApprovalId`, `RequestApproval` (waits for the
-decision), `Apply`, `RecordApplied`, `NotifyResult`. A rejection goes through
+`Detect`, `HasCandidates`, `NewApprovalId`, `StartReminder`, `RequestApproval`
+(waits for the decision), `Apply`, `RecordApplied`, `NotifyResult`. A rejection
+goes through
 `RecordRejected`, `MirrorRejected`, `NotifyRejected`; an expiry through
 `RecordExpired`, `MirrorExpired`, `NotifyExpired`. Dry runs end at
 `NotifyReportOnly` with only the weekly report.
@@ -252,6 +253,20 @@ about deciding depends on `approvalAuth`:
 
 The request is valid for about 72 hours (the record expires 30 minutes before
 the 72 hour task timeout). After that nothing is deleted for that run.
+
+Sixty hours after the request, if the approval is still `PENDING`, a reminder
+(subject `[Lab Janitor] Reminder: approval pending, run <runId>`) goes to the
+approvals topic with the same link or commands. It is sent at most once: the
+approval record gets a `remindedAt` timestamp, and a decided or expired
+approval is never reminded. The reminder is a second state machine
+(`Wait`, `Remind`, `Reminded`) that `StartReminder` starts without waiting for
+it, so every run that asks for approval leaves one reminder execution
+`RUNNING` for 60 hours; it ends without sending anything when the approval was
+already decided. If the reminder cannot be started, the run still asks for
+approval. To see a reminder without waiting, start an execution of the
+reminder state machine by hand with
+`{"approvalId": "<approvalId>", "runId": "<runId>", "waitSeconds": 5}` while an
+approval is pending.
 
 A retried approval request (a Lambda retry) refreshes the stored task token and
 sends the approval email again, so the owner may receive the same request
