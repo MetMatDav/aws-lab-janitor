@@ -7,6 +7,7 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
+from lab_janitor.alarms import Alarms
 from lab_janitor.approval_api import ApprovalApi
 from lab_janitor.audit import AuditStore
 from lab_janitor.config import JanitorConfig
@@ -27,8 +28,8 @@ class LabJanitorStack(Stack):
     Composes the shared dead-letter queue, the notification topics, the audit
     store, the detector that writes the weekly plan, the notifier that emails
     the report and the approval request, the approval endpoint, the executor
-    that applies an approved plan, and the scheduled workflow that ties them
-    together.
+    that applies an approved plan, the scheduled workflow that ties them
+    together, and the alarms that watch all of it.
     """
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs: Any) -> None:
@@ -89,6 +90,15 @@ class LabJanitorStack(Stack):
             executor=self.executor,
             notifications=self.notifications,
             audit=self.audit,
+            dlq=self.dlq,
+        )
+        self.alarms = Alarms(
+            self,
+            "Alarms",
+            config=self.config,
+            state_machine=self.workflow.state_machine,
+            reminder_machine=self.workflow.reminder_machine,
+            notifications=self.notifications,
             dlq=self.dlq,
         )
 

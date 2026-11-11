@@ -97,7 +97,6 @@ TOO_MANY_REQUESTS_RETRY = {
     "MaxAttempts": 5,
     "BackoffRate": 2,
 }
-FIVE_MINUTES = 300
 # What CDK grants the state machine role for its logs option (see the Step
 # Functions guide, "IAM Policies for logging to CloudWatch Logs").
 LOG_DELIVERY_ACTIONS = {
@@ -131,18 +130,6 @@ def _function_id(template: assertions.Template, handler: str) -> str:
 def _table_id(template: assertions.Template) -> str:
     (table_id,) = template.find_resources("AWS::DynamoDB::GlobalTable")
     return table_id
-
-
-def _alarm(template: assertions.Template, metric_name_or_expression: str) -> dict:
-    alarms = template.find_resources("AWS::CloudWatch::Alarm")
-    matches = [
-        alarm
-        for alarm in alarms.values()
-        if metric_name_or_expression in json.dumps(alarm["Properties"])
-    ]
-    assert len(matches) == 1, metric_name_or_expression
-    (alarm,) = matches
-    return alarm["Properties"]
 
 
 # --- state machine -------------------------------------------------------------------------
@@ -573,57 +560,6 @@ def test_schedule_follows_janitor_enabled_and_dry_run_context(
     assert properties["State"] == "DISABLED"
     assert json.loads(properties["Target"]["Input"]) == {"dryRun": False, "minAgeDays": 7}
     assert '"dryRun":false' in properties["Target"]["Input"]
-
-
-# --- alarms --------------------------------------------------------------------------------
-
-
-def test_alarms(template: assertions.Template):
-    template.resource_count_is("AWS::CloudWatch::Alarm", 2)
-    template.has_resource_properties(
-        "AWS::CloudWatch::Alarm", {"TreatMissingData": "notBreaching", "Threshold": 0}
-    )
-
-
-def test_dlq_alarm(template: assertions.Template):
-    alarm = _alarm(template, "ApproximateNumberOfMessagesVisible")
-    (dlq_id,) = template.find_resources("AWS::SQS::Queue")
-    assert alarm["Namespace"] == "AWS/SQS"
-    assert alarm["Dimensions"] == [
-        {"Name": "QueueName", "Value": {"Fn::GetAtt": [dlq_id, "QueueName"]}}
-    ]
-    assert alarm["Statistic"] == "Maximum"
-    assert alarm["Period"] == FIVE_MINUTES
-    assert alarm["EvaluationPeriods"] == 1
-    assert alarm["Threshold"] == 0
-    assert alarm["ComparisonOperator"] == "GreaterThanThreshold"
-    assert alarm["TreatMissingData"] == "notBreaching"
-
-
-def test_execution_failed_alarm(template: assertions.Template):
-    alarm = _alarm(template, "failed + timedOut")
-    assert alarm["Threshold"] == 1
-    assert alarm["ComparisonOperator"] == "GreaterThanOrEqualToThreshold"
-    assert alarm["TreatMissingData"] == "notBreaching"
-    metrics = {m["Id"]: m for m in alarm["Metrics"]}
-    assert metrics["expr_1"]["Expression"] == "failed + timedOut"
-    for metric_id, metric_name in (
-        ("failed", "ExecutionsFailed"),
-        ("timedOut", "ExecutionsTimedOut"),
-    ):
-        stat = metrics[metric_id]["MetricStat"]
-        assert stat["Metric"]["MetricName"] == metric_name
-        assert stat["Metric"]["Namespace"] == "AWS/States"
-        assert stat["Stat"] == "Sum"
-        assert stat["Period"] == FIVE_MINUTES
-
-
-def test_alarms_notify_alerts_on_alarm_and_ok(template: assertions.Template):
-    alerts = [{"Ref": _topic_id(template, "Lab Janitor Alerts")}]
-    for alarm in template.find_resources("AWS::CloudWatch::Alarm").values():
-        assert alarm["Properties"]["AlarmActions"] == alerts
-        assert alarm["Properties"]["OKActions"] == alerts
-        assert "—" not in alarm["Properties"]["AlarmDescription"]
 
 
 # --- outputs, description, tags ------------------------------------------------------------

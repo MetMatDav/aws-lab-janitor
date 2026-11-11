@@ -1,8 +1,6 @@
-"""The weekly workflow: state machine, Monday schedule and alarms."""
+"""The weekly workflow: state machine and Monday schedule."""
 
 from aws_cdk import Duration, RemovalPolicy, TimeZone
-from aws_cdk import aws_cloudwatch as cloudwatch
-from aws_cdk import aws_cloudwatch_actions as cw_actions
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_scheduler as scheduler
 from aws_cdk import aws_scheduler_targets as scheduler_targets
@@ -21,7 +19,6 @@ from lab_janitor.notifier import Notifier
 from lab_janitor.reminder import ApprovalReminder
 from lab_janitor.workflow_approval import APPROVAL_TIMEOUT, ApprovalBranch, add_throttle_retry
 
-ALARM_PERIOD = Duration.minutes(5)
 # Detect, report, apply and notify fit in two hours; an execution that asks
 # for approval also waits up to APPROVAL_TIMEOUT. A shorter execution timeout
 # would end the run before the RequestApproval timeout could route it to
@@ -31,7 +28,7 @@ EXECUTION_TIMEOUT = APPROVAL_TIMEOUT.plus(RUN_BUDGET)
 
 
 class Workflow(Construct):
-    """Standard state machine that runs the weekly sweep, plus its schedule and alarms.
+    """Standard state machine that runs the weekly sweep, plus its schedule.
 
     ``Defaults`` and ``Normalize`` build the run configuration (dry run
     unless the input explicitly says otherwise) and ``Detect`` sweeps and
@@ -71,7 +68,6 @@ class Workflow(Construct):
             audit=audit,
         )
         self.schedule = self._schedule(config, dlq)
-        self.alarms = self._alarms(notifications, dlq)
 
     def _state_machine(  # noqa: PLR0913 - one argument per construct the machine drives
         self,
@@ -243,48 +239,3 @@ class Workflow(Construct):
             enabled=config.janitor_enabled,
             description="Starts the lab janitor every Monday",
         )
-
-    def _alarms(self, notifications: Notifications, dlq: sqs.IQueue) -> list[cloudwatch.Alarm]:
-        dlq_not_empty = cloudwatch.Alarm(
-            self,
-            "DlqNotEmpty",
-            metric=dlq.metric_approximate_number_of_messages_visible(
-                period=ALARM_PERIOD, statistic="Maximum"
-            ),
-            threshold=0,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            evaluation_periods=1,
-            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            alarm_description=(
-                "Lab janitor: a scheduler start or an email delivery failed and "
-                "landed in the dead-letter queue"
-            ),
-        )
-        execution_failed = cloudwatch.Alarm(
-            self,
-            "ExecutionFailed",
-            metric=cloudwatch.MathExpression(
-                expression="failed + timedOut",
-                using_metrics={
-                    "failed": self.state_machine.metric_failed(
-                        period=ALARM_PERIOD, statistic="Sum"
-                    ),
-                    "timedOut": self.state_machine.metric_timed_out(
-                        period=ALARM_PERIOD, statistic="Sum"
-                    ),
-                },
-                period=ALARM_PERIOD,
-            ),
-            threshold=1,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            evaluation_periods=1,
-            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            alarm_description="Lab janitor: a weekly execution failed or timed out",
-        )
-
-        alarms = [dlq_not_empty, execution_failed]
-        action = cw_actions.SnsAction(notifications.alerts_topic)
-        for alarm in alarms:
-            alarm.add_alarm_action(action)
-            alarm.add_ok_action(action)
-        return alarms

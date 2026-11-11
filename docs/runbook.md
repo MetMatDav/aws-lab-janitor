@@ -398,6 +398,43 @@ npx cdk deploy LabJanitorStack --require-approval broadening \
 
 To resume, redeploy without `-c janitorEnabled=false` (it defaults to `true`).
 
+## Alarms
+
+Every alarm notifies the alerts topic when it fires and again when it recovers.
+Confirm the alerts subscription first: nothing can alarm about the alerts topic
+itself.
+
+| Alarm | It means | What to do |
+| ----- | -------- | ---------- |
+| `DlqNotEmpty` | The scheduler could not start a run after its retries, or SNS could not deliver an email. The message is in the dead-letter queue. | Read the message (below) to see which. For a failed start, check the state machine and the schedule, then start a run by hand. For a failed email, check the address. Purge the queue when done; the alarm clears. |
+| `ExecutionFailed` | A weekly execution failed or timed out. Most failures also send a `[Lab Janitor] Run failed` email from the `NotifyFailure` state, so expect two emails; a failure before or inside that state sends only this one. | Open the execution in Step Functions and read the failed state. Nothing is deleted by a failed run unless the result email says so. Start a new run once fixed. |
+| `ReminderFailed` | An execution of the reminder state machine failed. The approval itself is unaffected. | Decide the pending approval from the original email. Read the failed execution for the cause. |
+| `Heartbeat` | No execution started in the last 7 days: the schedule is disabled or broken, or the stack is. | Check the schedule state and the last execution. Start a manual dry-run; the alarm clears on the next evaluation. |
+| `ReportsUndelivered`, `ApprovalsUndelivered` | A message was published to that topic and reached no subscriber. SNS does not count that as a failure. | Almost always a subscription still `PendingConfirmation`: list them as in [Deploy in dry-run](#deploy-in-dry-run) and confirm. The message itself is gone; the report is in the plans bucket, and an approval request can be read from the approval record. |
+
+Things to know:
+
+- On a brand new stack the heartbeat alarm fires once, because seven days
+  without data are seven days without a run. Start a manual dry-run right after
+  deploying and it recovers.
+- With `-c janitorEnabled=false` the heartbeat alarm still changes state but
+  its actions are disabled, so a deliberate pause sends nothing.
+- The heartbeat can raise a false alarm for up to an hour if a Monday run starts
+  later than the one of the week before. The recovery notification follows.
+- The undelivered alarms look at one-hour periods. A publish in the last second
+  of an hour whose delivery lands in the next one can raise a false alarm that
+  clears an hour later.
+- The alarms moved to their own construct in Plan 3, so their names changed
+  once on that deploy.
+
+Reading and purging the dead-letter queue (the queue name is in the SQS console
+and starts with `LabJanitorStack-Dlq`):
+
+```
+python -c "import boto3; q = boto3.client('sqs', region_name='us-east-1'); url = q.get_queue_url(QueueName='<dlq-name>')['QueueUrl']; [print(m['Body']) for m in q.receive_message(QueueUrl=url, MaxNumberOfMessages=10, VisibilityTimeout=0).get('Messages', [])]"
+python -c "import boto3; q = boto3.client('sqs', region_name='us-east-1'); q.purge_queue(QueueUrl=q.get_queue_url(QueueName='<dlq-name>')['QueueUrl'])"
+```
+
 ## Troubleshooting
 
 ### Deploy fails with "SSM parameter /cdk-bootstrap/<qualifier>/version not found"
