@@ -576,7 +576,7 @@ Not exercised: the expiry path (pending, see above), the IAM route, and a
 - 19:53 to 20:01 UTC: controlled deletion test with decoys, the first real
   deletion. Three decoys deleted after approval, a keep-tagged snapshot left
   alone. Record: `docs/evidence/controlled-deletion-2026-11-12.md`.
-- The old stack is destroyed once a weekly run of this one has gone through.
+- The old stack, now report-only, is destroyed next.
 
 ## Pause and resume
 
