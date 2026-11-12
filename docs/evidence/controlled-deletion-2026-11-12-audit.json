@@ -293,6 +293,6 @@
       "sk": "APPROVAL#2e8fa9c9-fdf6-4d1b-9ff4-d4bcf523f244"
     }
   ],
-  "note": "Audit table items under RUN#<runId> for the controlled deletion test of 2026-11-12. approvedBy is reduced to mode and at, JSON strings are expanded, the account id is replaced by 123456789012.",
+  "note": "Audit table items under RUN#<runId> for the controlled deletion test of 2026-11-12. approvedBy is reduced to mode and at, JSON strings are expanded, the account id is replaced by 123456789012, and the names of the four resources of the account that the run detected and did not propose are replaced by example names.",
   "runId": "20261112T195659Z-bbb8"
 }
