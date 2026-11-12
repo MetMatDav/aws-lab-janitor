@@ -7,7 +7,7 @@ from botocore.client import BaseClient
 
 from notifier.delivery import require_subscriber
 from shared.plan_store import PlanStore
-from shared.report import truncate_report
+from shared.report import count_noun, truncate_report
 
 logger = logging.getLogger("notifier")
 
@@ -29,7 +29,7 @@ def report_subject(detect: dict) -> str:
     dry_run = detect["dryRun"]
     marker = f" {DRY_RUN_MARKER}" if dry_run else ""
     subject = (
-        f"{SUBJECT_PREFIX}: {detect['candidateCount']} candidates, "
+        f"{SUBJECT_PREFIX}: {count_noun(detect['candidateCount'], 'candidate')}, "
         f"~${detect['estimatedMonthlyUsd']:.2f}/month{marker}"
     )
     return fit_subject(subject, f"{SUBJECT_PREFIX}{marker}")

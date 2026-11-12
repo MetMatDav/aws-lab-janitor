@@ -2,6 +2,8 @@
 
 import math
 
+from shared.text import one_line
+
 SUMMARY_CANDIDATE_LIMIT = 50
 
 
@@ -40,7 +42,8 @@ def render_summary(summary: dict) -> str:
     lines = []
     for item in summary["candidates"]:
         line = (
-            f"[{item['kind']}] {item['resourceId']} ({item['region']}) {_one_line(item['reason'])}"
+            f"[{one_line(item['kind'])}] {one_line(item['resourceId'])} "
+            f"({one_line(item['region'])}) {one_line(item['reason'])}"
         )
         # .get: a summary read back from DynamoDB has no key for an unknown (None) cost.
         cost = item.get("estimatedMonthlyUsd")
@@ -51,8 +54,3 @@ def render_summary(summary: dict) -> str:
     if summary["truncated"]:
         lines.append(f"... and {omitted} more")
     return "\n".join(lines)
-
-
-def _one_line(text: str) -> str:
-    """Collapse whitespace (including newlines) so free text never breaks a summary line."""
-    return " ".join(text.split())

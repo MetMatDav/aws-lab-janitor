@@ -53,7 +53,7 @@ def test_min_age_at_the_cap_is_honoured():
 @pytest.mark.parametrize("value", ["-1", "seven", "\u0663", "1_0", " 7", "7\n", "+7", "3651"])
 def test_invalid_env_min_age_is_rejected(value):
     env = dict(os.environ, MIN_AGE_DAYS=value)
-    with pytest.raises(ValueError, match="MIN_AGE_DAYS must be an integer in 0..3650"):
+    with pytest.raises(ValueError, match=r"MIN_AGE_DAYS must be an integer in 0\.\.3650"):
         load_settings({}, env)
 
 

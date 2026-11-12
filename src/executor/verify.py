@@ -88,6 +88,10 @@ def _snapshot(item: dict, clients, settings: Settings, now: datetime) -> str | N
     blocker = _age_blocker(snapshot.get("StartTime"), settings, now)
     if blocker:
         return blocker
+    return _ami_blocker(ec2, snapshot_id)
+
+
+def _ami_blocker(ec2: BaseClient, snapshot_id: str) -> str | None:
     # Disabled AMIs are hidden by default but still pin their snapshots.
     response = ec2.describe_images(
         Owners=["self"],

@@ -471,11 +471,6 @@ def test_link_route_refuses_a_pending_record_at_or_past_its_expiry(api, expires_
     assert nothing_decided(api)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a callback that dies with anything but a botocore error after the claim answers 500 "
-    "'not recorded' and leaves the record DECIDING: the retry it invites can only get 409",
-)
 def test_unknown_callback_failure_after_the_claim_is_reported_as_unknown(api):
     """Foothold: none (robustness of the claim-then-callback sequence).
 

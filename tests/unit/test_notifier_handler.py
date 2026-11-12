@@ -180,3 +180,9 @@ def test_report_mode_reads_and_publishes_nothing_without_a_subscriber(
     with pytest.raises(delivery.NoConfirmedSubscriberError):
         notifier.handler(report_event(), None)
     # An S3 read or a publish would have hit a stub with no response queued.
+
+
+def test_subject_uses_the_singular_for_one_candidate():
+    subject = report.report_subject(detect_result(candidateCount=1))
+
+    assert subject == "[Lab Janitor] Weekly report: 1 candidate, ~$42.50/month (DRY RUN)"

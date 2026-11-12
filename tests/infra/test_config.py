@@ -69,7 +69,7 @@ def test_integer_settings_accept_cli_strings():
 
 @pytest.mark.parametrize("value", [-1, "-1", "seven", 1.5, True, "2.5", 3651, "3651"])
 def test_invalid_min_age_days_is_rejected(value: object):
-    with pytest.raises(ValueError, match="minAgeDays must be an integer in 0..3650"):
+    with pytest.raises(ValueError, match=r"minAgeDays must be an integer in 0\.\.3650"):
         _config(minAgeDays=value)
 
 

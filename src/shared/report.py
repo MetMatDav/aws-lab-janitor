@@ -2,6 +2,8 @@
 
 from itertools import groupby
 
+from shared.text import one_line
+
 TITLE = "LAB JANITOR WEEKLY REPORT"
 ACCOUNT_CLEAN = "ACCOUNT CLEAN: no billable resources detected"
 TRUNCATION_SUFFIX = "\n... truncated, {omitted} lines omitted. Full report: {pointer}"
@@ -12,14 +14,9 @@ def count_noun(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def _one_line(text: str) -> str:
-    """Collapse whitespace (including newlines) so free text never breaks a report line."""
-    return " ".join(text.split())
-
-
 def _resource_tokens(item: dict) -> list[str]:
     """``id (region)`` followed by the age token when the age is known."""
-    tokens = [item["resourceId"], f"({item['region']})"]
+    tokens = [one_line(item["resourceId"]), f"({one_line(item['region'])})"]
     if item["ageDays"] is not None:
         tokens.append(f"{item['ageDays']}d")
     return tokens
@@ -54,7 +51,7 @@ def _actionable(plan: dict) -> list[str]:
             [
                 f"[{item['kind']}]",
                 *_resource_tokens(item),
-                _one_line(item["reason"]),
+                one_line(item["reason"]),
                 *_cost_tokens(item),
             ]
         )
@@ -70,7 +67,7 @@ def _inventory(plan: dict) -> list[str]:
         items = list(group)
         lines.append(f"[{kind}] {len(items)} resources")
         lines.extend(
-            "  " + _join([*_resource_tokens(i), *_cost_tokens(i), _one_line(i["detail"])])
+            "  " + _join([*_resource_tokens(i), *_cost_tokens(i), one_line(i["detail"])])
             for i in items
         )
     return ["INVENTORY", *(lines or ["none"])]
@@ -85,7 +82,7 @@ def _errors(plan: dict) -> list[str]:
     lines = []
     for (region, family, classification), items in groups.items():
         first = items[0]
-        message = _one_line(first["error"])
+        message = one_line(first["error"])
         if len(items) == 1:
             lines.append(f"{region} {first['service']} {classification}: {message}")
         else:

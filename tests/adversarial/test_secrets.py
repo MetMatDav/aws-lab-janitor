@@ -483,11 +483,6 @@ def test_no_response_or_log_line_of_the_endpoint_carries_the_id_or_the_token(api
         assert secret not in logged
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="latent: the catch-all logs the raw text of any unexpected AWS error; a DynamoDB "
-    "message that echoed the key would put the approval id in the log",
-)
 @pytest.mark.parametrize("operation", ["get_item", "update_item"])
 def test_store_error_that_echoes_the_key_does_not_reach_the_log(api, caplog, operation):
     """Foothold: read access to the function's logs, and an error text that quotes the key.

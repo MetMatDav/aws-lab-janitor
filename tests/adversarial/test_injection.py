@@ -179,11 +179,6 @@ def test_reason_with_line_breaks_cannot_forge_a_decision_line_in_the_approval_em
     assert len([line for line in lines if line.startswith("Type the confirmation code")]) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="latent: resourceId, kind and region are printed raw in the candidate summary; a "
-    "line break in one of them forges lines in the approval email and the review page",
-)
 @pytest.mark.parametrize("field", ["resourceId", "kind", "region"])
 def test_resource_id_with_line_breaks_cannot_forge_a_decision_line(field):
     """Foothold: none today. Every candidate kind has an id alphabet AWS restricts
@@ -240,11 +235,6 @@ FORMAT_TRICKS = {
 }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="tag values reach the emails with control and bidi-format characters intact: only "
-    "whitespace is collapsed, so ESC, NUL, backspace and RLO survive into the message",
-)
 @pytest.mark.parametrize("trick", FORMAT_TRICKS.values(), ids=FORMAT_TRICKS.keys())
 def test_control_and_bidi_characters_from_a_name_tag_do_not_reach_the_report(trick):
     """Foothold (b), if EC2 accepts the character in a tag value (not verified offline).
@@ -260,11 +250,6 @@ def test_control_and_bidi_characters_from_a_name_tag_do_not_reach_the_report(tri
     assert hostile == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the approver's User-Agent is printed raw in the outcome emails: a line separator "
-    "in it adds forged lines after 'Rejected by:' / 'Approved by:'",
-)
 @pytest.mark.parametrize("separator", ["\u2028", "\x85", "\x0b", "\n"], ids=ascii)
 @pytest.mark.parametrize("mode", ["rejected", "result"])
 def test_user_agent_cannot_add_lines_to_the_outcome_email(monkeypatch, mode, separator):

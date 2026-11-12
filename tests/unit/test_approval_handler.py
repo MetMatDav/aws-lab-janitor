@@ -1017,3 +1017,25 @@ def test_unexpected_failure_logs_no_traceback_and_no_secret(deps, monkeypatch, c
 )
 def test_allowed_principal(principal, role_arn, allowed):
     assert approval.allowed_principal(principal, role_arn) is allowed
+
+
+@pytest.mark.parametrize(
+    "confirm",
+    [
+        "12\ufb00",  # the ligature casefolds to "ff"
+        "\u00a012ff",  # no-break space
+        "12ff\u3000",  # ideographic space
+        "\uff11\uff12ff",  # fullwidth digits
+        "12f",
+        "12fff",
+        "",
+    ],
+    ids=ascii,
+)
+def test_confirmation_code_is_compared_as_ascii(confirm):
+    assert approval._confirmation_matches(confirm, "20261102T120000Z-12ff") is False
+
+
+@pytest.mark.parametrize("confirm", ["12ff", "12FF", " 12ff\t", "12Ff\r\n"])
+def test_confirmation_code_ignores_ascii_case_and_surrounding_blanks(confirm):
+    assert approval._confirmation_matches(confirm, "20261102T120000Z-12ff") is True

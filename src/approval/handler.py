@@ -20,6 +20,7 @@ from urllib.parse import parse_qs
 
 import boto3
 from botocore.client import BaseClient
+from botocore.exceptions import BotoCoreError, ClientError
 
 from approval import page
 from approval.decision import DECISIONS, Decision, decide
@@ -179,9 +180,28 @@ def _parse_json_decision(text: str | None) -> str | None:
     return decision if isinstance(decision, str) and decision in DECISIONS else None
 
 
+def _safe_detail(error: Exception) -> str:
+    """What may be logged about ``error``: never the text of an AWS or botocore message.
+
+    Those messages can quote the request, and the request carries the approval
+    id (the item key) or the task token. The janitor's own errors name hashes only.
+    """
+    if isinstance(error, ClientError):
+        return f"code={error.response.get('Error', {}).get('Code')}"
+    if isinstance(error, BotoCoreError):
+        return "botocore error"
+    return str(error)
+
+
 def _confirmation_matches(confirm: str, run_id: str) -> bool:
-    expected = run_id[-CONFIRMATION_LENGTH:].casefold()
-    return secrets.compare_digest(confirm.strip().casefold().encode(), expected.encode())
+    # ASCII only: casefold() and a bare strip() would accept look-alikes such as
+    # the ligature that folds to "ff" or a no-break space.
+    typed = confirm.strip(" \t\r\n")
+    # lower() can map a non-ASCII letter to an ASCII one; such input is compared
+    # as it came, and its bytes never equal the ASCII code. Always one comparison.
+    candidate = typed.lower() if typed.isascii() else typed
+    expected = run_id[-CONFIRMATION_LENGTH:].lower()
+    return secrets.compare_digest(candidate.encode(), expected.encode())
 
 
 def _closed_status(record: ApprovalRecord, now: str) -> int | None:
@@ -284,5 +304,10 @@ def handler(event: dict, context, now: datetime | None = None) -> dict:
         return ROUTES[route](event, approval_id, timestamp, log)
     except Exception as error:  # noqa: BLE001 - every failure becomes a 500 page
         # No traceback: chained exception messages can carry the approval id or the token.
-        log.error("approval request failed (%s: %s)", type(error).__name__, error, exc_info=False)
+        log.error(
+            "approval request failed (%s: %s)",
+            type(error).__name__,
+            _safe_detail(error),
+            exc_info=False,
+        )
         return _error(route, 500)

@@ -8,6 +8,7 @@ from notifier.delivery import require_subscriber
 from notifier.report import REPORT_EMAIL_LIMIT_BYTES, fit_subject
 from shared.plan_store import plan_key
 from shared.report import truncate_report
+from shared.text import one_line
 
 logger = logging.getLogger("notifier")
 
@@ -21,21 +22,18 @@ def _plan_pointer(run_id: str) -> str:
     return f"Full plan: s3://{os.environ['PLANS_BUCKET']}/{plan_key(run_id)}"
 
 
-def _one_line(text: str) -> str:
-    return " ".join(text.split())
-
-
 def describe_approver(who: dict) -> str:
     """``<mode> <principal> <ip> <userAgent> at <at>``, with whichever of those keys are present."""
     tokens = [str(who[key]) for key in ("mode", "principal", "ip", "userAgent") if who.get(key)]
     if who.get("at"):
         tokens.append(f"at {who['at']}")
-    return " ".join(tokens) or UNKNOWN_APPROVER
+    # The User-Agent is whatever the browser of the person deciding sent.
+    return one_line(" ".join(tokens)) or UNKNOWN_APPROVER
 
 
 def _item_line(item: dict) -> str:
-    line = f"{item['outcome']} [{item['kind']}] {item['resourceId']} ({item['region']})"
-    reason = _one_line(item.get("reason") or "")
+    line = one_line(f"{item['outcome']} [{item['kind']}] {item['resourceId']} ({item['region']})")
+    reason = one_line(item.get("reason") or "")
     return f"{line}: {reason}" if reason else line
 
 

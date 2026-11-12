@@ -7,9 +7,9 @@ confirmation, so a refused request never writes.
 2. Resume Step Functions with the task token: ``SendTaskSuccess`` on approve,
    ``SendTaskFailure`` (error ``Rejected``) on reject. ``TaskTimedOut`` marks the
    approval EXPIRED; any other ``ClientError`` (the request was refused, so not
-   delivered) reverts the claim so the human can retry (500). A ``BotoCoreError``
-   (such as a read timeout) leaves the claim DECIDING and answers 504: the
-   callback may have been delivered, so reverting could let a second decision
+   delivered) reverts the claim so the human can retry (500). Any other failure
+   (a botocore read timeout, a reset connection) leaves the claim DECIDING and
+   answers 504: the callback may have been delivered, so reverting could let a second decision
    race the first, and telling the human "not recorded" could be a lie.
 3. ``finalize``: DECIDING -> APPROVED / REJECTED, tried up to three times. The
    callback was delivered, so the answer to the human does not change if the
@@ -126,13 +126,6 @@ def decide(
     # Only error codes and class names are logged: Step Functions messages can echo the token.
     try:
         _resume(states, token, request)
-    except BotoCoreError as error:
-        # The request may have reached Step Functions, so the claim stays DECIDING.
-        log.error(
-            "decision callback outcome unknown (%s), approval left DECIDING",
-            type(error).__name__,
-        )
-        return UNKNOWN_OUTCOME
     except ClientError as error:
         code = error.response.get("Error", {}).get("Code")
         if code == TASK_TIMED_OUT:
@@ -142,6 +135,14 @@ def decide(
         store.revert(approval_id)
         log.error("decision callback failed (code=%s), claim reverted", code)
         return 500
+    except Exception as error:  # noqa: BLE001 - any other failure has an unknown outcome
+        # A botocore timeout, a connection reset while the response was being read:
+        # the request may have reached Step Functions, so the claim stays DECIDING.
+        log.error(
+            "decision callback outcome unknown (%s), approval left DECIDING",
+            type(error).__name__,
+        )
+        return UNKNOWN_OUTCOME
     status = DECISIONS[request.decision]
     _finalize(store, approval_id, status, now, log)
     log.info("approval decided (status=%s, mode=%s)", status, request.approver["mode"])
