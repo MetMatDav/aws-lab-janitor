@@ -202,9 +202,12 @@ deploy. Use `--require-approval never` only in non-interactive pipelines.
 After the deploy:
 
 1. Confirm the three SNS subscription emails (reports, alerts and approvals) once. Until
-   you do, nothing is delivered to that address, and SNS does not count a
-   publish to a topic with no confirmed subscriber as a failure. Check before
-   the first manual run:
+   you do, nothing is delivered to that address. SNS does not count a publish
+   to a topic with no confirmed subscriber as a failure, so the notifier checks
+   first: a run that would email an unconfirmed reports or approvals topic
+   fails with `NoConfirmedSubscriberError` and a `[Lab Janitor] Run failed`
+   email. Nothing guards the alerts topic itself, so confirm that one first.
+   Check before the first manual run:
 
    ```bash
    aws sns list-subscriptions --query "Subscriptions[?contains(TopicArn, 'LabJanitorStack')].[SubscriptionArn,Endpoint]" --output table
@@ -295,8 +298,8 @@ inventory.
 
 - The CDK CLI prints a notice about unconfigured feature flags. It is harmless.
 - A third subscription confirmation email arrives for the approvals topic,
-  next to the reports and alerts ones. Until you confirm it, approval requests
-  are dropped silently, like any report to a pending subscription. The new
+  next to the reports and alerts ones. Until you confirm it, a run with
+  candidates fails in `RequestApproval` before it writes or sends anything. The new
   `ApprovalApiUrl` output is the base URL of the approval API.
   Resending the confirmation with `aws sns subscribe` does not work for the
   approvals topic: its policy denies `sns:Subscribe` to every principal except
@@ -547,8 +550,8 @@ deletions disabled. Decoy `LAB-decoy-plan3`, deleted by hand afterwards.
   `UpdateItem` and its `PutItem` of the mirror. The operator's own reads of the
   table during the rehearsal are there as well.
 - Defect: `ReportsUndelivered` fired at 17:42:00 UTC and recovered at 17:43:00,
-  with both emails delivered. See [Alarms](#alarms) and the follow-ups file.
-  `ApprovalsUndelivered` did not change state.
+  with both emails delivered. `ApprovalsUndelivered` did not change state.
+  Both alarms were removed after this rehearsal; see [Alarms](#alarms).
 
 Not exercised: the expiry path (pending, see above), the IAM route, and a
 `POST` on a decided approval (seen on 2026-11-11).
@@ -612,7 +615,6 @@ itself.
 | `ExecutionFailed` | A weekly execution failed or timed out. Most failures also send a `[Lab Janitor] Run failed` email from the `NotifyFailure` state, so expect two emails; a failure before or inside that state sends only this one. | Open the execution in Step Functions and read the failed state. Nothing is deleted by a failed run unless the result email says so. Start a new run once fixed. |
 | `ReminderFailed` | An execution of the reminder state machine failed. The approval itself is unaffected. | Decide the pending approval from the original email. Read the failed execution for the cause. |
 | `Heartbeat` | No execution started in the last 7 days: the schedule is disabled or broken, or the stack is. | Check the schedule state and the last execution. Start a manual dry-run; the alarm recovers within one to two hours (alarms over daily periods are evaluated hourly). |
-| `ReportsUndelivered`, `ApprovalsUndelivered` | A message was published to that topic and reached no subscriber. SNS does not count that as a failure. | Almost always a subscription still `PendingConfirmation`: list them as in [Deploy in dry-run](#deploy-in-dry-run) and confirm. The message itself is gone; the report is in the plans bucket, and an approval request can be read from the approval record. |
 
 Things to know:
 
@@ -623,20 +625,13 @@ Things to know:
   its actions are disabled, so a deliberate pause sends nothing.
 - The heartbeat can raise a false alarm for up to an hour if a Monday run starts
   later than the one of the week before. The recovery notification follows.
-- Known defect, seen on 2026-11-12: an undelivered alarm can fire for one minute
-  on a healthy delivery. It is evaluated every minute over the last 60 minutes,
-  and CloudWatch can receive the publish datapoint of a message before its
-  delivery datapoint. The signature is an `ALARM` email followed by `OK` one
-  minute later; a message that really reached nobody keeps the alarm in `ALARM`
-  for about an hour. The follow-ups file tracks the redesign.
-- An undelivered alarm goes back to `OK` by itself about an hour after it
-  fired, when the publish leaves the one-hour window. That recovery email does
-  not mean the subscription was fixed: check it.
-- The alarm is blind for the hour in which a subscription is created: the
-  confirmation email counts as a delivery and cancels out a report published in
-  the same hour. This is what happened on the first run of 2026-11-03 (one
-  publish, one delivery, both in the same hour). So confirm the three
-  subscriptions before the first run; the alarm covers the weeks after.
+- No alarm watches email delivery. The notifier lists the subscriptions of a
+  topic before publishing and refuses when none is confirmed, which fails the
+  run; see [Troubleshooting](#a-run-failed-with-noconfirmedsubscribererror).
+  Two alarms that compared the SNS publish and delivery metrics existed for one
+  day and were removed: CloudWatch can receive the publish datapoint of a
+  message before its delivery datapoint, so they fired on healthy runs
+  (2026-11-12, `docs/evidence/alarm-history-2026-11-12.json`).
 - The alarms moved to their own construct in Plan 3, so their names changed
   once on that deploy.
 
@@ -699,15 +694,27 @@ In this incident the qualifier was `hnb659fds` and the version was 32.
 A later `cdk bootstrap` that changes the template will update the parameter
 normally.
 
+### A run failed with `NoConfirmedSubscriberError`
+
+The notifier refused to publish because the topic named in the error has no
+confirmed subscription: it is still `PendingConfirmation`, or someone used the
+unsubscribe link at the bottom of an email. The check runs before the state
+does anything else, so `NotifyReportOnly` sent no report and `RequestApproval`
+wrote no approval record. In `NotifyResult`, `NotifyRejected` or
+`NotifyExpired` the outcome is already in the audit table and only the email is
+missing; for a result, read the items under `RUN#<runId>`. A reminder that hits
+this fails its own execution and raises `ReminderFailed`.
+
+Confirm the subscription as in [Deploy in dry-run](#deploy-in-dry-run), then
+start a new run.
+
 ### A run succeeded but no report email arrived
 
-The notifier logs `weekly report published (messageId=...)` as soon as SNS
-accepts the message. Delivery is separate. If the subscription is still
-pending, the message is dropped silently: `NumberOfNotificationsDelivered`
-and `NumberOfNotificationsFailed` both stay at 0 for that minute, and the
-only `Delivered` datapoint on the topic is the confirmation email itself,
-stamped at stack creation time. Follow the confirmation step under "Deploy
-in dry-run", then start another manual run.
+A confirmed subscription existed when the notifier published, and it logged
+`weekly report published (messageId=...)`. Look in spam first. Then compare
+`NumberOfNotificationsDelivered` and `NumberOfNotificationsFailed` of the topic
+for that minute: a failed delivery is redriven to the dead-letter queue and
+raises `DlqNotEmpty`.
 
 ### Deploy fails on reserved concurrency
 

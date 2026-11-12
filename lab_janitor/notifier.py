@@ -1,6 +1,7 @@
 """The notifier function: the only janitor component that sends email."""
 
 from aws_cdk import Duration, RemovalPolicy
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from constructs import Construct
@@ -17,10 +18,11 @@ class Notifier(Construct):
     """Lambda function that sends the weekly report and the approval requests.
 
     The role can read plans (and their versions) under ``plans/``, publish to
-    the reports and approvals topics, and create or refresh approval records
-    under ``APPROVAL#`` partitions; nothing else. Unlike the detector it has
-    no reserved concurrency: approval records are created conditionally, so
-    concurrent invocations cannot overwrite each other.
+    the reports and approvals topics and list their subscriptions (it refuses
+    to publish to a topic nobody confirmed), and create or refresh approval
+    records under ``APPROVAL#`` partitions; nothing else. Unlike the detector
+    it has no reserved concurrency: approval records are created conditionally,
+    so concurrent invocations cannot overwrite each other.
     """
 
     def __init__(  # noqa: PLR0913 - construct props are keyword-only dependencies
@@ -67,5 +69,14 @@ class Notifier(Construct):
         audit.grant_approval_writes(self.function)
         notifications.reports_topic.grant_publish(self.function)
         notifications.approvals_topic.grant_publish(self.function)
+        self.function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["sns:ListSubscriptionsByTopic"],
+                resources=[
+                    notifications.reports_topic.topic_arn,
+                    notifications.approvals_topic.topic_arn,
+                ],
+            )
+        )
 
         acknowledge_janitor_function(self.function, audit.plans_bucket)

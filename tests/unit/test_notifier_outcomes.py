@@ -2,7 +2,9 @@ import json
 
 import pytest
 
+from notifier import delivery
 from notifier import handler as notifier
+from tests.unit.conftest import PENDING_SUBSCRIPTION, expect_subscriptions
 
 BUCKET = "test-plans"
 TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:reports"
@@ -19,6 +21,7 @@ def sns(monkeypatch, sns_stub):
 
 
 def expect_publish(sns, subject: str, message: str) -> None:
+    expect_subscriptions(sns, TOPIC_ARN)
     sns.add_response(
         "publish",
         {"MessageId": MESSAGE_ID},
@@ -253,6 +256,7 @@ def test_result_with_thousands_of_items_stays_under_the_email_limit(sns, monkeyp
     ]
     event = result_event(apply={"deleted": 5000, "failed": 0, "skipped": 0, "items": items})
     published = []
+    expect_subscriptions(sns, TOPIC_ARN)
 
     def capture(**params):
         published.append(params)
@@ -277,3 +281,11 @@ def test_result_with_thousands_of_items_stays_under_the_email_limit(sns, monkeyp
     notice = f"... truncated, {5000 - len(kept)} lines omitted. Full report: "
     assert 0 < len(kept) < 5000
     assert f"{notice}audit table items under RUN#{RUN_ID}" in message
+
+
+@pytest.mark.parametrize("mode", ["result", "expired", "rejected"])
+def test_outcome_publishes_nothing_without_a_subscriber(sns, mode):
+    expect_subscriptions(sns, TOPIC_ARN, PENDING_SUBSCRIPTION)
+
+    with pytest.raises(delivery.NoConfirmedSubscriberError):
+        notifier.handler(result_event(mode=mode), None)

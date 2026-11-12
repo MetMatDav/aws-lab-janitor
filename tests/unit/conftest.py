@@ -134,3 +134,27 @@ def sns_stub():
 def ddb_stub():
     """A stubbed DynamoDB client and its Stubber."""
     yield from _stubbed_client("dynamodb")
+
+
+PENDING_SUBSCRIPTION = "PendingConfirmation"
+
+
+def expect_subscriptions(sns_stubber: Stubber, topic_arn: str, *subscription_arns: str) -> None:
+    """Queue one ``ListSubscriptionsByTopic`` page; with no arns, one confirmed subscription."""
+    arns = subscription_arns or (f"{topic_arn}:11111111-2222-3333-4444-555555555555",)
+    sns_stubber.add_response(
+        "list_subscriptions_by_topic",
+        {
+            "Subscriptions": [
+                {
+                    "SubscriptionArn": arn,
+                    "Owner": "123456789012",
+                    "Protocol": "email",
+                    "Endpoint": "owner@example.com",
+                    "TopicArn": topic_arn,
+                }
+                for arn in arns
+            ]
+        },
+        {"TopicArn": topic_arn},
+    )

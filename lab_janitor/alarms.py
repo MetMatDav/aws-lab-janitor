@@ -6,7 +6,6 @@ All alarms notify the alerts topic when they fire and when they recover.
 from aws_cdk import Duration
 from aws_cdk import aws_cloudwatch as cloudwatch
 from aws_cdk import aws_cloudwatch_actions as cw_actions
-from aws_cdk import aws_sns as sns
 from aws_cdk import aws_sqs as sqs
 from aws_cdk import aws_stepfunctions as sfn
 from constructs import Construct
@@ -18,7 +17,6 @@ ALARM_PERIOD = Duration.minutes(5)
 # CloudWatch caps an alarm's evaluation range at 7 days: 7 periods of one day.
 HEARTBEAT_PERIOD = Duration.days(1)
 HEARTBEAT_DAYS = 7
-DELIVERY_PERIOD = Duration.hours(1)
 
 
 class Alarms(Construct):
@@ -33,10 +31,12 @@ class Alarms(Construct):
       broken, account issue). Missing data is breaching, so a brand new stack
       alarms until its first run. Its actions follow ``janitorEnabled``, so a
       deliberate pause does not notify.
-    - ``ReportsUndelivered`` and ``ApprovalsUndelivered``: a message was
-      published and reached nobody, which is what a subscription pending
-      confirmation looks like. SNS reports no failure for that. The alerts
-      topic has no such alarm: it would have nowhere to send it.
+
+    No alarm watches email delivery. A publish that reaches nobody (a
+    subscription pending confirmation, or removed) is refused by the notifier
+    before it happens, which fails the run. Comparing the SNS publish and
+    delivery metrics was tried first and raised false alarms: CloudWatch can
+    receive the publish datapoint of a message before its delivery datapoint.
     """
 
     def __init__(  # noqa: PLR0913 - construct props are keyword-only dependencies
@@ -57,16 +57,6 @@ class Alarms(Construct):
             self._execution_failed(state_machine),
             self._reminder_failed(reminder_machine),
             self._heartbeat(state_machine, config),
-            self._undelivered(
-                "ReportsUndelivered",
-                notifications.reports_topic,
-                "Lab janitor: a report was published but reached no subscriber",
-            ),
-            self._undelivered(
-                "ApprovalsUndelivered",
-                notifications.approvals_topic,
-                "Lab janitor: an approval request was published but reached no subscriber",
-            ),
         ]
         action = cw_actions.SnsAction(notifications.alerts_topic)
         for alarm in self.alarms:
@@ -138,35 +128,4 @@ class Alarms(Construct):
             treat_missing_data=cloudwatch.TreatMissingData.BREACHING,
             actions_enabled=config.janitor_enabled,
             alarm_description="Lab janitor: no execution started in the last 7 days",
-        )
-
-    def _undelivered(
-        self, construct_id: str, topic: sns.ITopic, description: str
-    ) -> cloudwatch.Alarm:
-        # Metric math arithmetic treats a missing value as 0, so a publish with
-        # no delivery datapoint yields a positive result. A failed delivery is
-        # redriven to the dead-letter queue, which has its own alarm.
-        return cloudwatch.Alarm(
-            self,
-            construct_id,
-            metric=cloudwatch.MathExpression(
-                expression="published - delivered - failed",
-                using_metrics={
-                    "published": topic.metric_number_of_messages_published(
-                        period=DELIVERY_PERIOD, statistic="Sum"
-                    ),
-                    "delivered": topic.metric_number_of_notifications_delivered(
-                        period=DELIVERY_PERIOD, statistic="Sum"
-                    ),
-                    "failed": topic.metric_number_of_notifications_failed(
-                        period=DELIVERY_PERIOD, statistic="Sum"
-                    ),
-                },
-                period=DELIVERY_PERIOD,
-            ),
-            threshold=0,
-            comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
-            evaluation_periods=1,
-            treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            alarm_description=description,
         )

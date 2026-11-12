@@ -78,9 +78,7 @@ delivered decision; the runbook passages on `DECIDING`, on repeating `-c`
 flags, on the undelivered alarm recovering by itself and on what the data
 events contain. Deferred:
 
-- Undelivered alarms: blind in the hour a subscription is created (the
-  confirmation email is a delivery). Task 8 showed the alarm also flaps on a
-  normal run; see the rehearsal section below.
+- Undelivered alarms: removed on 2026-11-12, see the rehearsal section below.
 - Approval handler: if botocore retries the claim `UpdateItem` after a lost
   response, the retry fails against the handler's own `DECIDING` and the
   approver gets `409` with no callback sent; the run waits until it expires.
@@ -107,18 +105,22 @@ events contain. Deferred:
 
 Record in the runbook. Open after it:
 
-- Defect, to fix before the cutover: `ReportsUndelivered` raised a false alarm
-  on a delivered message (`ALARM` 17:42:00 UTC, `OK` 17:43:00). The rejection
-  email was published at 17:41:28; the alarm, evaluated every minute over a
-  sliding hour, saw `published` 2 and `delivered` 1 for one evaluation. Whether
-  it flaps depends on where in the minute the publish lands, so the run of
-  2026-11-11 did not show it. No alarm setting asks for a breach to last: one
-  message is one datapoint. Options: check the subscriptions of the topic in
-  the notifier before publishing and fail the run when none is confirmed (no
-  alarm, no lag, fails fast instead of waiting 72 hours for nobody); or a
-  composite alarm whose actions are suppressed while a publish is recent (two
-  more alarms, still blind in the subscription hour); or drop the two alarms
-  and rely on the post-deploy subscription check.
+- Fixed on 2026-11-12: `ReportsUndelivered` raised a false alarm on a
+  delivered message (`ALARM` 17:42:00 UTC, `OK` 17:43:00). The rejection email
+  was published at 17:41:28; the alarm, evaluated every minute over a sliding
+  hour, saw `published` 2 and `delivered` 1 for one evaluation. No alarm
+  setting asks for a breach to last, because one message is one datapoint.
+  Both undelivered alarms are gone. The notifier now lists the subscriptions of
+  a topic before publishing (`notifier/delivery.py`) and fails the run when
+  none is confirmed, before it reads, writes or sends anything. This replaces
+  decision 3 of the Plan 3 document. Not yet deployed; the refusal itself is
+  covered by unit tests only, and the first run after the deploy shows whether
+  the new `sns:ListSubscriptionsByTopic` grant works.
+- Left as they are: the alerts topic has no guard (its failure would have
+  nowhere to go); a subscription that is confirmed but bounces is the
+  dead-letter queue's alarm; a result email refused after the deletions leaves
+  the outcome in the audit table only.
+- Plan 4: the spec and the Plan 3 document still describe the two alarms.
 - The approval of run `20261111T203848Z-138c` is `PENDING` and its execution
   waits in `RequestApproval`. It expires on 2026-11-14 20:09 UTC; check then
   for `RecordExpired`, `MirrorExpired`, `NotifyExpired`, `Expired`, the

@@ -38,112 +38,6 @@
     }
   },
   "Resources": {
-    "AlarmsApprovalsUndelivered3FE37DDB": {
-      "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "NotificationsAlertsTopicDFE3487E"
-          }
-        ],
-        "AlarmDescription": "Lab janitor: an approval request was published but reached no subscriber",
-        "ComparisonOperator": "GreaterThanThreshold",
-        "EvaluationPeriods": 1,
-        "Metrics": [
-          {
-            "Expression": "published - delivered - failed",
-            "Id": "expr_1",
-            "ReturnData": true
-          },
-          {
-            "Id": "published",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "TopicName",
-                    "Value": {
-                      "Fn::GetAtt": [
-                        "NotificationsApprovalsTopic7B662042",
-                        "TopicName"
-                      ]
-                    }
-                  }
-                ],
-                "MetricName": "NumberOfMessagesPublished",
-                "Namespace": "AWS/SNS"
-              },
-              "Period": 3600,
-              "Stat": "Sum"
-            },
-            "ReturnData": false
-          },
-          {
-            "Id": "delivered",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "TopicName",
-                    "Value": {
-                      "Fn::GetAtt": [
-                        "NotificationsApprovalsTopic7B662042",
-                        "TopicName"
-                      ]
-                    }
-                  }
-                ],
-                "MetricName": "NumberOfNotificationsDelivered",
-                "Namespace": "AWS/SNS"
-              },
-              "Period": 3600,
-              "Stat": "Sum"
-            },
-            "ReturnData": false
-          },
-          {
-            "Id": "failed",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "TopicName",
-                    "Value": {
-                      "Fn::GetAtt": [
-                        "NotificationsApprovalsTopic7B662042",
-                        "TopicName"
-                      ]
-                    }
-                  }
-                ],
-                "MetricName": "NumberOfNotificationsFailed",
-                "Namespace": "AWS/SNS"
-              },
-              "Period": 3600,
-              "Stat": "Sum"
-            },
-            "ReturnData": false
-          }
-        ],
-        "OKActions": [
-          {
-            "Ref": "NotificationsAlertsTopicDFE3487E"
-          }
-        ],
-        "Tags": [
-          {
-            "Key": "ManagedBy",
-            "Value": "cdk"
-          },
-          {
-            "Key": "Project",
-            "Value": "aws-lab-janitor"
-          }
-        ],
-        "Threshold": 0,
-        "TreatMissingData": "notBreaching"
-      },
-      "Type": "AWS::CloudWatch::Alarm"
-    },
     "AlarmsDlqNotEmpty18BAB365": {
       "Properties": {
         "AlarmActions": [
@@ -348,112 +242,6 @@
           }
         ],
         "Threshold": 1,
-        "TreatMissingData": "notBreaching"
-      },
-      "Type": "AWS::CloudWatch::Alarm"
-    },
-    "AlarmsReportsUndelivered9A791B96": {
-      "Properties": {
-        "AlarmActions": [
-          {
-            "Ref": "NotificationsAlertsTopicDFE3487E"
-          }
-        ],
-        "AlarmDescription": "Lab janitor: a report was published but reached no subscriber",
-        "ComparisonOperator": "GreaterThanThreshold",
-        "EvaluationPeriods": 1,
-        "Metrics": [
-          {
-            "Expression": "published - delivered - failed",
-            "Id": "expr_1",
-            "ReturnData": true
-          },
-          {
-            "Id": "published",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "TopicName",
-                    "Value": {
-                      "Fn::GetAtt": [
-                        "NotificationsReportsTopic7F0B91E5",
-                        "TopicName"
-                      ]
-                    }
-                  }
-                ],
-                "MetricName": "NumberOfMessagesPublished",
-                "Namespace": "AWS/SNS"
-              },
-              "Period": 3600,
-              "Stat": "Sum"
-            },
-            "ReturnData": false
-          },
-          {
-            "Id": "delivered",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "TopicName",
-                    "Value": {
-                      "Fn::GetAtt": [
-                        "NotificationsReportsTopic7F0B91E5",
-                        "TopicName"
-                      ]
-                    }
-                  }
-                ],
-                "MetricName": "NumberOfNotificationsDelivered",
-                "Namespace": "AWS/SNS"
-              },
-              "Period": 3600,
-              "Stat": "Sum"
-            },
-            "ReturnData": false
-          },
-          {
-            "Id": "failed",
-            "MetricStat": {
-              "Metric": {
-                "Dimensions": [
-                  {
-                    "Name": "TopicName",
-                    "Value": {
-                      "Fn::GetAtt": [
-                        "NotificationsReportsTopic7F0B91E5",
-                        "TopicName"
-                      ]
-                    }
-                  }
-                ],
-                "MetricName": "NumberOfNotificationsFailed",
-                "Namespace": "AWS/SNS"
-              },
-              "Period": 3600,
-              "Stat": "Sum"
-            },
-            "ReturnData": false
-          }
-        ],
-        "OKActions": [
-          {
-            "Ref": "NotificationsAlertsTopicDFE3487E"
-          }
-        ],
-        "Tags": [
-          {
-            "Key": "ManagedBy",
-            "Value": "cdk"
-          },
-          {
-            "Key": "Project",
-            "Value": "aws-lab-janitor"
-          }
-        ],
-        "Threshold": 0,
         "TreatMissingData": "notBreaching"
       },
       "Type": "AWS::CloudWatch::Alarm"
@@ -2119,6 +1907,18 @@
               "Resource": {
                 "Ref": "NotificationsApprovalsTopic7B662042"
               }
+            },
+            {
+              "Action": "sns:ListSubscriptionsByTopic",
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Ref": "NotificationsReportsTopic7F0B91E5"
+                },
+                {
+                  "Ref": "NotificationsApprovalsTopic7B662042"
+                }
+              ]
             }
           ],
           "Version": "2012-10-17"

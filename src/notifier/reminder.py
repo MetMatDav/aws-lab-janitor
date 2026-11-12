@@ -11,6 +11,7 @@ import os
 from datetime import UTC, datetime
 
 from notifier.approval import CONFIRMATION_LENGTH, decision_sections
+from notifier.delivery import require_subscriber
 from notifier.report import fit_subject
 from shared.approvals import ApprovalRecord, short_hash
 from shared.plan_summary import render_summary
@@ -53,6 +54,8 @@ def send_reminder(event: dict, now: datetime | None = None) -> dict:
 
     approval_id = event["approvalId"]
     _store, sns, approvals = build_dependencies()
+    # Before stamping: a reminder is sent at most once, so it must be able to arrive.
+    require_subscriber(sns, os.environ["APPROVALS_TOPIC_ARN"])
     record = approvals.mark_reminded(approval_id, (now or datetime.now(UTC)).isoformat())
     if record is None:
         logger.info(

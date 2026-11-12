@@ -5,13 +5,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from botocore.response import StreamingBody
 
-from notifier import approval
+from notifier import approval, delivery
 from notifier import handler as notifier
 from shared.approvals import APPROVAL_TTL_DAYS, ApprovalRecord, ApprovalStore, expiry_for
 from shared.dynamo import serialize
 from shared.plan import plan_bytes, plan_sha256
 from shared.plan_store import PlanStore
 from shared.plan_summary import render_summary, summarize_plan
+from tests.unit.conftest import PENDING_SUBSCRIPTION, expect_subscriptions
 
 BUCKET = "test-plans"
 TABLE = "test-audit"
@@ -164,6 +165,12 @@ def expect_record(ddb, run_id: str = RUN_ID) -> None:
     )
 
 
+def expect_subscribers(sns) -> None:
+    """Both topics are checked before anything is read or written."""
+    expect_subscriptions(sns, APPROVALS_ARN)
+    expect_subscriptions(sns, REPORTS_ARN)
+
+
 def expect_approvals_publish(sns, subject: str, message: str) -> None:
     sns.add_response(
         "publish",
@@ -221,6 +228,7 @@ SUBJECT = f"[Lab Janitor] Approval needed: 2 deletions, ~$34.35/month, run {RUN_
 
 def run_request(stubs, message: str, subject: str = SUBJECT, run_id: str = RUN_ID) -> dict:
     s3, sns, ddb = stubs
+    expect_subscribers(sns)
     expect_plan_read(s3, run_id)
     expect_record(ddb, run_id)
     expect_approvals_publish(sns, subject, message)
@@ -273,7 +281,8 @@ def test_request_approval_both_mode_sends_both(stubs, monkeypatch):
 
 
 def test_request_approval_refuses_sha_mismatch(stubs):
-    s3, _sns, _ddb = stubs
+    s3, sns, _ddb = stubs
+    expect_subscribers(sns)
     expect_plan_read(s3)
     event = approval_event(planSha256="f" * 64)
 
@@ -317,6 +326,7 @@ def test_unknown_auth_mode_raises():
 
 def test_request_approval_retry_refreshes_the_token_and_republishes(stubs, caplog):
     s3, sns, ddb = stubs
+    expect_subscribers(sns)
     expect_plan_read(s3)
     ddb.add_client_error(
         "put_item",
@@ -388,3 +398,21 @@ def test_subject_and_body_keep_the_plural_for_two_candidates():
 
     assert ": 2 deletions, " in approval.approval_subject(summary)
     assert message.startswith("Lab Janitor wants to delete 2 resources (")
+
+
+def test_request_approval_writes_nothing_when_nobody_would_get_the_request(stubs):
+    _s3, sns, _ddb = stubs
+    expect_subscriptions(sns, APPROVALS_ARN, PENDING_SUBSCRIPTION)
+
+    with pytest.raises(delivery.NoConfirmedSubscriberError, match="approvals"):
+        approval.request_approval(approval_event(), now=NOW)
+    # No plan read, no approval record, no email: each would have hit an empty stub.
+
+
+def test_request_approval_writes_nothing_when_nobody_would_get_the_report(stubs):
+    _s3, sns, _ddb = stubs
+    expect_subscriptions(sns, APPROVALS_ARN)
+    expect_subscriptions(sns, REPORTS_ARN, PENDING_SUBSCRIPTION)
+
+    with pytest.raises(delivery.NoConfirmedSubscriberError, match="reports"):
+        approval.request_approval(approval_event(), now=NOW)

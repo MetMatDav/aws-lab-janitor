@@ -5,6 +5,7 @@ import os
 from datetime import UTC, datetime
 
 from notifier import report
+from notifier.delivery import require_subscriber
 from notifier.report import fit_subject
 from shared.approvals import (
     PENDING,
@@ -83,8 +84,9 @@ def approval_message(
 def request_approval(event: dict, now: datetime | None = None) -> dict:
     """Verify the plan, store a PENDING approval holding the task token and email the owner.
 
-    Raises ``PlanIntegrityError`` before writing or sending anything if the plan
-    in S3 does not hash to the sha256 the detector reported.
+    Raises before writing or sending anything: ``NoConfirmedSubscriberError`` if
+    either topic has no confirmed subscription, ``PlanIntegrityError`` if the
+    plan in S3 does not hash to the sha256 the detector reported.
     """
     from notifier.handler import build_dependencies  # noqa: PLC0415 - handler imports this module
 
@@ -92,6 +94,9 @@ def request_approval(event: dict, now: datetime | None = None) -> dict:
     run_id = detect["runId"]
     log = logging.LoggerAdapter(logger, {"runId": run_id})
     store, sns, approvals = build_dependencies()
+    # Both emails or neither: a request nobody receives would wait 72 hours.
+    require_subscriber(sns, os.environ["APPROVALS_TOPIC_ARN"])
+    require_subscriber(sns, os.environ["REPORTS_TOPIC_ARN"])
 
     plan, sha256 = store.get_plan(run_id, detect["planVersionId"])
     if sha256 != detect["planSha256"]:
@@ -140,7 +145,7 @@ def request_approval(event: dict, now: datetime | None = None) -> dict:
         short_hash(record.approval_id),
         response["MessageId"],
     )
-    report.publish_report(event)
+    report.send_report(event, store, sns)
     return {
         "approvalId": record.approval_id,
         "expiresAt": record.expires_at,

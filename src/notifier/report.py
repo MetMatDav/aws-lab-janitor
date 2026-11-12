@@ -3,6 +3,10 @@
 import logging
 import os
 
+from botocore.client import BaseClient
+
+from notifier.delivery import require_subscriber
+from shared.plan_store import PlanStore
 from shared.report import truncate_report
 
 logger = logging.getLogger("notifier")
@@ -35,10 +39,16 @@ def publish_report(event: dict) -> dict:
     """Publish the truncated weekly report of the detector run in ``event["detect"]``."""
     from notifier.handler import build_dependencies  # noqa: PLC0415 - handler imports this module
 
+    store, sns, _approvals = build_dependencies()
+    require_subscriber(sns, os.environ["REPORTS_TOPIC_ARN"])
+    return send_report(event, store, sns)
+
+
+def send_report(event: dict, store: PlanStore, sns: BaseClient) -> dict:
+    """Publish the report; the caller has checked that the reports topic has a subscriber."""
     detect = event["detect"]
     run_id = detect["runId"]
     log = logging.LoggerAdapter(logger, {"runId": run_id})
-    store, sns, _approvals = build_dependencies()
     report = store.get_report(run_id, detect["reportVersionId"])
     pointer = f"s3://{os.environ['PLANS_BUCKET']}/{detect['reportKey']}"
     message = truncate_report(report, REPORT_EMAIL_LIMIT_BYTES, pointer)

@@ -2,11 +2,12 @@ from datetime import UTC, datetime
 
 import pytest
 
+from notifier import delivery, reminder
 from notifier import handler as notifier
-from notifier import reminder
 from shared.approvals import ApprovalRecord, ApprovalStore, expiry_for
 from shared.dynamo import serialize
 from shared.plan_summary import render_summary, summarize_plan
+from tests.unit.conftest import PENDING_SUBSCRIPTION, expect_subscriptions
 
 TABLE = "test-audit"
 APPROVALS_ARN = "arn:aws:sns:us-east-1:123456789012:approvals"
@@ -108,6 +109,7 @@ def event() -> dict:
 def test_reminder_emails_the_approvals_topic_with_the_link(stubs):
     sns, ddb = stubs
     message = reminder.reminder_message(RECORD, APPROVAL_URL, "link", "abc1")
+    expect_subscriptions(sns, APPROVALS_ARN)
     ddb.add_response("update_item", {"Attributes": record_item()}, mark_params())
     sns.add_response(
         "publish",
@@ -132,14 +134,15 @@ def test_reminder_emails_the_approvals_topic_with_the_link(stubs):
 
 
 def test_reminder_is_silent_when_the_approval_is_not_pending(stubs):
-    _sns, ddb = stubs
+    sns, ddb = stubs
+    expect_subscriptions(sns, APPROVALS_ARN)
     ddb.add_client_error(
         "update_item",
         service_error_code="ConditionalCheckFailedException",
         expected_params=mark_params(),
     )
 
-    # No publish response is queued: any SNS call would fail the test.
+    # No publish response is queued: a publish would fail the test.
     assert reminder.send_reminder(event(), NOW) == {"reminded": False}
 
 
@@ -147,6 +150,7 @@ def test_reminder_in_iam_mode_has_commands_and_no_link(stubs, monkeypatch):
     sns, ddb = stubs
     monkeypatch.setenv("APPROVAL_AUTH", "iam")
     message = reminder.reminder_message(RECORD, APPROVAL_URL, "iam", "abc1")
+    expect_subscriptions(sns, APPROVALS_ARN)
     ddb.add_response("update_item", {"Attributes": record_item()}, mark_params())
     sns.add_response(
         "publish",
@@ -165,3 +169,12 @@ def test_handler_dispatches_reminder_mode(monkeypatch):
 
     assert notifier.handler(event(), None) == {"ok": 1}
     assert seen == [event()]
+
+
+def test_reminder_stamps_nothing_without_a_subscriber(stubs):
+    sns, _ddb = stubs
+    expect_subscriptions(sns, APPROVALS_ARN, PENDING_SUBSCRIPTION)
+
+    with pytest.raises(delivery.NoConfirmedSubscriberError):
+        reminder.send_reminder(event(), NOW)
+    # The record keeps no remindedAt: an UpdateItem would have hit an empty stub.

@@ -157,4 +157,4 @@ def test_three_modes_synthesize_the_rest_of_the_stack(
 ):
     for each in (template, data_only_template, no_trail_template):
         assert "StateMachineArn" in each.to_json()["Outputs"]
-        each.resource_count_is("AWS::CloudWatch::Alarm", 6)
+        each.resource_count_is("AWS::CloudWatch::Alarm", 4)

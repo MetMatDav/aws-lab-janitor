@@ -76,11 +76,16 @@ def test_notifier_environment_and_grants(template: assertions.Template):
         key=str,
     )
 
+    lists = [st for st in statements if "sns:ListSubscriptionsByTopic" in actions(st)]
+    assert all(actions(st) == ["sns:ListSubscriptionsByTopic"] for st in lists)
+    assert sorted((r for st in lists for r in resources(st)), key=str) == sorted(published, key=str)
+
     granted = {a for st in statements for a in actions(st)}
     assert granted == {
         "s3:GetObject",
         "s3:GetObjectVersion",
         "sns:Publish",
+        "sns:ListSubscriptionsByTopic",
         "dynamodb:PutItem",
         "dynamodb:UpdateItem",
     }

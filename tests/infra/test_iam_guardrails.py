@@ -102,6 +102,7 @@ NOTIFIER_ACTIONS = {
     "dynamodb:PutItem",
     "dynamodb:UpdateItem",
     "sns:Publish",
+    "sns:ListSubscriptionsByTopic",
 }
 
 TABLE_ARN = {"Fn::GetAtt": ["AuditTable18A3095C", "Arn"]}

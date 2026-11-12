@@ -4,6 +4,7 @@ import json
 import logging
 import os
 
+from notifier.delivery import require_subscriber
 from notifier.report import REPORT_EMAIL_LIMIT_BYTES, fit_subject
 from shared.plan_store import plan_key
 from shared.report import truncate_report
@@ -42,6 +43,7 @@ def _publish(subject: str, message: str, run_id: str) -> dict:
     from notifier.handler import build_dependencies  # noqa: PLC0415 - handler imports this module
 
     _store, sns, _approvals = build_dependencies()
+    require_subscriber(sns, os.environ["REPORTS_TOPIC_ARN"])
     response = sns.publish(
         TopicArn=os.environ["REPORTS_TOPIC_ARN"], Subject=subject, Message=message
     )

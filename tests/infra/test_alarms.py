@@ -7,7 +7,6 @@ from aws_cdk import assertions
 from tests.infra.helpers import reminder_machine_id, state_machine_id
 
 FIVE_MINUTES = 300
-ONE_HOUR = 3600
 ONE_DAY = 86400
 
 
@@ -37,7 +36,7 @@ def _alarm(template: assertions.Template, needle: str, references: str | None = 
 
 
 def test_alarm_count(template: assertions.Template):
-    template.resource_count_is("AWS::CloudWatch::Alarm", 6)
+    template.resource_count_is("AWS::CloudWatch::Alarm", 4)
 
 
 def test_dlq_alarm(template: assertions.Template):
@@ -123,45 +122,12 @@ def test_only_the_heartbeat_can_have_its_actions_disabled(live_template: asserti
     assert disabled == ["Lab janitor: no execution started in the last 7 days"]
 
 
-def test_undelivered_alarms_cover_reports_and_approvals_only(template: assertions.Template):
-    watched = {}
+def test_no_alarm_compares_sns_publishes_with_deliveries(template: assertions.Template):
+    # Tried in Plan 3 and removed: CloudWatch can receive the publish datapoint
+    # of a message before its delivery datapoint, so that alarm fired on healthy
+    # runs. The notifier checks the subscriptions before publishing instead.
     for alarm in template.find_resources("AWS::CloudWatch::Alarm").values():
-        properties = alarm["Properties"]
-        metrics = {m["Id"]: m for m in properties.get("Metrics", [])}
-        expressions = [m["Expression"] for m in metrics.values() if "Expression" in m]
-        if expressions != ["published - delivered - failed"]:
-            continue
-        topics = set()
-        for metric_id, metric_name in (
-            ("published", "NumberOfMessagesPublished"),
-            ("delivered", "NumberOfNotificationsDelivered"),
-            ("failed", "NumberOfNotificationsFailed"),
-        ):
-            stat = metrics[metric_id]["MetricStat"]
-            assert stat["Metric"]["Namespace"] == "AWS/SNS"
-            assert stat["Metric"]["MetricName"] == metric_name
-            assert (stat["Stat"], stat["Period"]) == ("Sum", ONE_HOUR)
-            (dimension,) = stat["Metric"]["Dimensions"]
-            assert dimension["Name"] == "TopicName"
-            topics.add(dimension["Value"]["Fn::GetAtt"][0])
-        (topic_id,) = topics
-        assert (properties["Threshold"], properties["ComparisonOperator"]) == (
-            0,
-            "GreaterThanThreshold",
-        )
-        assert properties["EvaluationPeriods"] == 1
-        assert properties["TreatMissingData"] == "notBreaching"
-        watched[topic_id] = properties["AlarmDescription"]
-
-    # The alerts topic cannot report on itself: its own alarm would have nowhere to go.
-    assert watched == {
-        _topic_id(template, "Lab Janitor Reports"): (
-            "Lab janitor: a report was published but reached no subscriber"
-        ),
-        _topic_id(template, "Lab Janitor Approvals"): (
-            "Lab janitor: an approval request was published but reached no subscriber"
-        ),
-    }
+        assert "AWS/SNS" not in json.dumps(alarm["Properties"])
 
 
 def test_alarms_notify_alerts_on_alarm_and_ok(template: assertions.Template):

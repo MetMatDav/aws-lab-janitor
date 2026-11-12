@@ -3,9 +3,10 @@ import io
 import pytest
 from botocore.response import StreamingBody
 
-from notifier import approval, outcomes, report
+from notifier import approval, delivery, outcomes, report
 from notifier import handler as notifier
 from shared.plan_store import PlanStore
+from tests.unit.conftest import PENDING_SUBSCRIPTION, expect_subscriptions
 
 BUCKET = "test-plans"
 TOPIC_ARN = "arn:aws:sns:us-east-1:123456789012:reports"
@@ -44,6 +45,7 @@ def report_event(**overrides) -> dict:
 def install(monkeypatch, s3_stub, sns_stub, report: str) -> None:
     """Make ``build_dependencies`` return stubbed S3 and SNS clients serving ``report``."""
     s3_client, s3_stubber = s3_stub
+    expect_subscriptions(sns_stub[1], TOPIC_ARN)
     body = report.encode()
     s3_stubber.add_response(
         "get_object",
@@ -163,3 +165,18 @@ def test_fit_subject_keeps_99_characters_and_falls_back_at_100():
     # SNS refuses an email subject of 100 characters or more.
     assert report.fit_subject("s" * 99, "fallback") == "s" * 99
     assert report.fit_subject("s" * 100, "fallback") == "fallback"
+
+
+def test_report_mode_reads_and_publishes_nothing_without_a_subscriber(
+    monkeypatch, s3_stub, sns_stub
+):
+    monkeypatch.setattr(
+        notifier,
+        "build_dependencies",
+        lambda: (PlanStore(s3_stub[0], BUCKET), sns_stub[0], None),
+    )
+    expect_subscriptions(sns_stub[1], TOPIC_ARN, PENDING_SUBSCRIPTION)
+
+    with pytest.raises(delivery.NoConfirmedSubscriberError):
+        notifier.handler(report_event(), None)
+    # An S3 read or a publish would have hit a stub with no response queued.
