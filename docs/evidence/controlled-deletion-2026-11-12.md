@@ -1,6 +1,8 @@
 # Controlled deletion test: 2026-11-12
 
-The first time the janitor deleted anything. Three decoys were created for the
+The first deletion by this stack, and the first time a volume or a snapshot
+was deleted by either janitor (the first one had deleted a single self-test
+dashboard; see [legacy-weekly-runs.md](legacy-weekly-runs.md)). Three decoys were created for the
 purpose, proposed by a live run, approved by the owner through the emailed
 link and deleted by the executor. A fourth decoy carried the keep tag and
 survived. All times are UTC. The audit table items of the run are in

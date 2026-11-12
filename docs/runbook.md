@@ -574,8 +574,8 @@ Not exercised: the expiry path (pending, see above), the IAM route, and a
 - 19:51 UTC: this stack was redeployed with `-c dryRun=false`. Checked
   afterwards: executor `DELETIONS_ENABLED=true`, schedule `ENABLED` with input
   `{"dryRun":false,"minAgeDays":7}`, four alarms `OK`.
-- 19:53 to 20:01 UTC: controlled deletion test with decoys, the first real
-  deletion. Three decoys deleted after approval, a keep-tagged snapshot left
+- 19:53 to 20:01 UTC: controlled deletion test with decoys, the first
+  deletion by this stack. Three decoys deleted after approval, a keep-tagged snapshot left
   alone. Record: `docs/evidence/controlled-deletion-2026-11-12.md`.
 - The old stack, now report-only, is destroyed next.
 
