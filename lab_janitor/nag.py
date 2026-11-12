@@ -20,7 +20,10 @@ LOGGING_BASELINE_REASON = (
     "Lambda logging baseline: CreateLogGroup, CreateLogStream, PutLogEvents only"
 )
 PLANS_PREFIX_REASON = "Object-level grant scoped to the plans/ prefix"
-RUNTIME_REASON = "Python 3.13 pinned across repo, CI and runtime; upgrade tracked in roadmap"
+RUNTIME_REASON = (
+    "Python 3.13 is pinned in the repo, in CI and in the Lambda runtime; "
+    "a newer runtime is one deliberate change to all three"
+)
 SYNC_INVOKE_REASON = (
     "Invoked synchronously by Step Functions; failures are caught by the state machine and alarmed"
 )

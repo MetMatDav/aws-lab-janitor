@@ -88,7 +88,7 @@ def test_python_version():
 
 - [ ] **Step 5: Write `.github/workflows/ci.yml`**
 
-On `push` and `pull_request`: `actions/checkout@v4`; `actions/setup-python@v5` with `python-version-file: .python-version` and `cache: pip`; `actions/setup-node@v4` with `node-version: 22`; `pip install -r requirements.txt -r requirements-dev.txt`; `npm ci`; `ruff check . && ruff format --check .`; `pytest -q`; `npx cdk synth --quiet -c reportEmail=ci@example.com` with env `CDK_DEFAULT_ACCOUNT=123456789012`, `CDK_DEFAULT_REGION=us-east-1`; `cfn-lint --ignore-checks W3005 cdk.out/*.template.json`. The synth and cfn-lint steps are added in this task but will only pass after Task 13; mark them `continue-on-error: true` now and remove that flag in Task 13.
+On `push` and `pull_request`: `actions/checkout@v4`; `actions/setup-python@v5` with `python-version-file: .python-version` and `cache: pip`; `actions/setup-node@v4` with `node-version: 22`; `pip install -r requirements.txt -r requirements-dev.txt`; `npm ci`; `ruff check . && ruff format --check .`; `pytest -q`; `npx cdk synth --quiet -c reportEmail=ci@example.com` with env `CDK_DEFAULT_ACCOUNT=123456789012`, `CDK_DEFAULT_REGION=us-east-1`; `cfn-lint --ignore-checks W3005 -- cdk.out/*.template.json`. The synth and cfn-lint steps are added in this task but will only pass after Task 13; mark them `continue-on-error: true` now and remove that flag in Task 13.
 
 - [ ] **Step 6: Install and run**
 
@@ -621,7 +621,7 @@ Run: `CDK_DEFAULT_ACCOUNT=123456789012 CDK_DEFAULT_REGION=us-east-1 npx cdk synt
 
 - [ ] **Step 5: Run the full suite**
 
-Run: `make lint && make test && cfn-lint --ignore-checks W3005 cdk.out/*.template.json`
+Run: `make lint && make test && cfn-lint --ignore-checks W3005 -- cdk.out/*.template.json`
 Expected: all exit 0.
 
 - [ ] **Step 6: Remove `continue-on-error` from `ci.yml`, generate the snapshot, commit**

@@ -122,7 +122,7 @@ def tracked_text_files() -> list[Path]:
 
 def scan_history() -> list[str]:
     """Forbidden tokens in any commit message or any version of any file."""
-    log = subprocess.run(
+    log = subprocess.run(  # noqa: S603 - fixed arguments, no shell
         ["git", "log", "-p", "--all", f"--format={_COMMIT_MARK}%h%n%B"],  # noqa: S607 - git from PATH
         capture_output=True,
         text=True,

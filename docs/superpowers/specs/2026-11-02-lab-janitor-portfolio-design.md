@@ -1,7 +1,7 @@
 # Lab Janitor: portfolio release design
 
 Date: 2026-11-02
-Status: v2, reviewed; awaiting owner approval
+Status: v4, built and deployed; section 12 lists what changed while building
 Author: Mateo Cortés (with Claude)
 
 ## 1. Intent and why
@@ -352,6 +352,38 @@ Phases 1 and 2 can proceed in parallel with 6; phase 3 depends on 2; phase 5 dep
 
 ## 11. Review history
 
+- v4 (2026-11-12): section 12 added after the cutover. Sections 1 to 10 keep the text that was approved and built from.
 - v1 (2026-11-02): initial draft.
 - v3 (2026-11-03): corrections found while executing Plan 1. The EIP rule as written could never fire (PROPOSED was only written for candidates, and an EIP needed a prior PROPOSED to be one); replaced by ELIGIBLE records and an age counted from the first live sighting. Audit sort key carries the kind. Run id format and candidate key match the code (`YYYYMMDDTHHMMSSZ-<4 hex>`, `resourceId`). The IAM approval route is enforced by SigV4 plus a principal check in the handler, since HTTP APIs have no resource policies.
 - v2 (2026-11-02): after three independent reviews (builder, AWS pattern, security). Fixed: heartbeat alarm within CloudWatch's 7-day cap; approval records in their own partition with `LeadingKeys` scoping; writers for the Record* states; detector Query permission for the EIP rule; notifier reads plan and report from S3 and owns the summary and sha256; compact Step Functions payload; `ResultPath` isolation of the callback; exact S3 version reads; conditional audit writes and PITR; POST claim-then-callback sequence with 409/410; `SendTask*` on `Resource: "*"`; page hardening and typed confirmation; reserved concurrency only where it is a safety property plus `TooManyRequestsException` retries; cutover starts by switching the old stack to dry-run; Python 3.13 pinned everywhere; three topics; bucket policy shape and lifecycle for noncurrent versions. Owner decisions recorded in section 8.
+
+## 12. As built (2026-11-12)
+
+Sections 1 to 10 are the design that was approved. This is what the code does
+differently, why, and where to look. The plans under `docs/superpowers/plans/`
+and the follow-ups file record each decision when it was taken.
+
+| Section | The design says | What was built | Why | Where |
+|---|---|---|---|---|
+| 4.2 | `RecordApplied` writes the `RUN#SUMMARY` record with counts and approver metadata | It writes the `APPROVAL#<id>` mirror under the run, with the event `APPROVED`, the counts and the approver. `RUN#SUMMARY` is the detector's | One writer per item: the detector owns the summary, the state machine owns the outcome of the approval | `lab_janitor/workflow_approval.py` |
+| 4.2 | The execution waits 72 h for approval | The approval task waits 72 h and the execution may run 74 h | A shorter execution timeout would cut off a run approved in the last minutes | `lab_janitor/workflow.py` |
+| 4.3 | The handler claims the record, then verifies the typed code and reverts on mismatch | It verifies the code first and claims second; a wrong code returns `400` before any write | A refused request should leave no trace in the record and cannot race a real decision | `src/approval/handler.py` |
+| 4.3 | Answers are `200`, `400`, `409`, `410` | Also `500` (the callback was refused, the claim was put back) and `504` (the outcome of the callback is unknown, the record stays `DECIDING`); the final write is tried three times | The human must not be told "not recorded" when it may have been | `src/approval/decision.py`, runbook "A decision left in DECIDING" |
+| 4.3 | The approval id is 32 random bytes | A `States.UUID()` value from the state machine | No extra Lambda to generate it; it also means the id is in the execution history | `lab_janitor/workflow_approval.py`, `docs/known-limitations.md` |
+| 4.3 | The confirmation is the last four characters of the run id | The same, compared as ASCII after trimming ASCII blanks | Unicode look-alikes that case-fold to the code were accepted | `src/approval/handler.py` |
+| 4.7 | The notifier publishes and writes approval records | It also holds `dynamodb:UpdateItem` on `APPROVAL#*` (a retried task refreshes the stored token; the reminder stamps `remindedAt`) and `sns:ListSubscriptionsByTopic` on its two topics | Retries and the reminder; the subscription check below | `lab_janitor/notifier.py` |
+| 4.7 | The detector may query the table for the Elastic IP rule | It may query the `by-resource` index only | A query on the table could read an approval record | `lab_janitor/audit.py` |
+| 4.9 | The executor applies the approved plan | Only within one hour of the decision | An approved record never went stale, so a redrive or a direct invoke could re-apply an old plan | `src/executor/handler.py` |
+| 4.10 | "Approval pending too long": a custom metric and an alarm | An email reminder after 60 h, sent by a second state machine through the notifier; and an alarm on a failed reminder | Nothing would emit the metric while the run waits, and an email reaches the approver directly | `lab_janitor/reminder.py`, ADR 0011 |
+| 4.10 | Four alarms | Four alarms: dead-letter queue, failed execution, heartbeat, failed reminder | The reminder alarm replaces the pending-approval one | `lab_janitor/alarms.py` |
+| 2, 4.10 | An email SNS cannot hand over produces a signal | A failed delivery goes to the dead-letter queue and its alarm. A publish that would reach nobody is refused by the notifier before it happens, and the run fails. An alarm on the publish and delivery metrics existed for one day and raised a false alarm | CloudWatch can see the publish datapoint of a message before its delivery datapoint | `src/notifier/delivery.py`, ADR 0012 |
+| 5.3 | Flags are booleans; `minAgeDays` is a non-negative integer | A flag that is not `true` or `false` fails the synth; `minAgeDays` is 0 to 3650, in the context and in the execution input; `allowedRegions` must include `us-east-1` when set | A mistyped pause switch left the schedule on; a huge value crashed the detector; dashboards are deleted through us-east-1 | `lab_janitor/config.py`, `src/shared/settings.py` |
+| 5.3 | Reserved concurrency 1 on the detector and the executor | The same, unless `-c reservedConcurrency=false` | New accounts have a Lambda concurrency quota of 10 and cannot reserve | `lab_janitor/detector.py`, runbook "Account quotas" |
+| 5.2, 5.4 | `tests/iam/simulate_policies.sh` reads the policy from `cdk.out` | `tests/iam/simulate_policies.py` synthesizes the stack in process for a placeholder account | The CDK CLI writes the caller's real account id into `cdk.out` | `tests/iam/simulate_policies.py` |
+| 5.4 | Unit, infrastructure and IAM simulation tests | Also an adversarial suite, property tests and document tests | Two review passes before the cutover | `tests/adversarial`, `tests/property`, `tests/docs`, ADR 0014 |
+| 5.5 | Ten ADRs | Fourteen | Four decisions were taken while building | `docs/adr/` |
+| 5.5 | Evidence: a redacted report email and a graph of weekly invocations | The stored report of the controlled run with real names replaced; the graph comes from the metrics of the old function | The email holds the same text as the stored report | `docs/evidence/` |
+| 6 | A second `POST` on the approved id returns `409`; redacted screenshots are stored | The decided approval answered `409` to a `GET`; the second `POST` was seen on 2026-11-11; no screenshots yet | The owner did not resubmit the form | `docs/evidence/controlled-deletion-2026-11-12.md` |
+| 7 | Deploy the new stack, verify a weekly report, enable deletions, test, destroy the old stack | Done in that order between 2026-11-03 and 2026-11-12 | | runbook "Cutover record" |
+
+Not built, and written up with what each would take: `docs/known-limitations.md`.
