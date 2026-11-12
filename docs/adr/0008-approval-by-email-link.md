@@ -49,3 +49,4 @@ authenticates the caller with SigV4 and compares it with a configured role;
   `test_iam_route_rejects_other_principals_before_any_write`.
 - [tests/unit/test_approval_page.py](../../tests/unit/test_approval_page.py):
   `test_form_has_no_script_and_escapes_summary`.
+- [docs/threat-model.md](../threat-model.md).
