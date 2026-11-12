@@ -126,7 +126,8 @@ in us-east-1.
 ## Account quotas
 
 On the owner's account the Lambda account concurrency quota ("Concurrent
-executions") was 10, with 10 unreserved. Lambda rejects a reservation that
+executions") was 10, with 10 unreserved, until it was raised to 1000 on
+2026-11-12. Lambda rejects a reservation that
 would leave the account with fewer than its minimum unreserved concurrency (100
 on standard accounts), so with a quota of 10 no reservation is possible and the
 deploy fails. Check yours in Service Quotas (AWS Lambda).

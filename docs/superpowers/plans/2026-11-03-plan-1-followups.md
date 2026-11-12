@@ -14,20 +14,56 @@ Items deferred from the Plan 1 reviews (task reviews and the whole-branch review
 - The audit sort key carries the kind: `RESOURCE#<region>#<kind>#<resourceId>#<EVENT>`.
 - Run id format and candidate key: spec v3 (done before Plan 2 started).
 
-## Plan 3 (operations, CloudTrail, cutover)
+## Done in Plan 3
 
-Items marked "deferred from Plan 2" were on the Plan 2 list and were not folded in.
+Plan 3 closed on 2026-11-12 with the cutover, the controlled deletion test and
+the retirement of the old stack.
 
-- Verify with `simulate-custom-policy` that the keep-tag Deny is honored by `cloudwatch:DeleteDashboards` and `internetmonitor:DeleteMonitor`. This is unverified: those actions may not evaluate the tag condition on their resources, and the executor's per-item re-verification is the effective guard today.
-- `allowedRegions` limitation: the executor calls the dashboard API through us-east-1, so a deployment that sets `allowedRegions` without `us-east-1` fails every dashboard deletion with `AccessDenied` (recorded as `FAILED`). Either always allow `us-east-1` for dashboards or reject such a configuration at synth time.
-- Deferred from Plan 2: pass the time budget to the remaining paginated listings (NAT gateways, VPC endpoints, images, RDS, ELB, global, monitor) or lower sweep retries; add a mid-loop deadline test.
-- Deferred from Plan 2: route the four tag-lookup variants through `read_tags` in `common.py`; use `.get("ARN")` for ElastiCache clusters.
-- Deferred from Plan 2: tests still missing: prefix shorter than 3, empty markers, lowercase tag shape, `is_kept` negatives, region fallback, `to_dict` shapes, `enabled_regions`, `main()` never writes, subject boundary 99/100, config parsing matrix, delete-Deny `Resource` pinned, managed policies and `NotAction` in the IAM guardrail helpers (extend to the executor role).
-- Deferred from Plan 2: "AMI-backed" reason only set for lab snapshots; the unreachable `attached` reason; `global` as a service label; audit warnings without `runId`.
-- Deferred from Plan 2: request a Lambda concurrency quota increase (to at least 101) and redeploy without `-c reservedConcurrency=false`.
-- `createTrail=dataEventsOnly`: an organization Control Tower trail already delivers management events for this account.
-- Before the controlled deletion test, switch the old `AwsJanitorStack` to dry-run.
-- Delivery evidence, not just publish evidence: the first manual run (2026-11-03) published to a reports topic whose email subscription was still `PendingConfirmation`, so the report vanished with no failure metric and no alarm. Add a `NumberOfNotificationsDelivered` check to the runbook's healthy-run shape and consider an alarm on `Published - Delivered > 0` for the reports topic (the alerts topic cannot alarm on itself; document that gap). The approvals topic has the same gap.
+- The keep-tag Deny is honored by `cloudwatch:DeleteDashboards` and
+  `internetmonitor:DeleteMonitor`: both resource types support
+  `aws:ResourceTag`, and `iam:SimulateCustomPolicy` agrees (22 cases,
+  `docs/evidence/iam-simulation.txt`).
+- `allowedRegions` without `us-east-1` is rejected at synth.
+- Every paginated listing of the detector takes the time budget; ElastiCache
+  clusters without an ARN no longer drop the region's listing.
+- The tests listed as missing after Plan 2 were added, and the suite gained an
+  adversarial pass and property tests (see the section of 2026-11-12 below).
+- CloudTrail: the stack's trail runs in `dataEventsOnly`, next to the
+  organization trail that already delivers management events.
+- Alarms: heartbeat, failed execution, failed reminder, dead-letter queue. The
+  "published but not delivered" alarm was built, raised a false alarm on the
+  first rehearsal and was replaced by a subscription check in the notifier.
+- Approval reminder by email after 60 hours.
+- Seen working live: a wrong confirmation code, a rejection, the reminder, the
+  failure alarm, the data events, and a real deletion after approval.
+- The Lambda concurrency quota of the account is 1000 since 2026-11-12.
+- The old `AwsJanitorStack` went to report-only and was destroyed on
+  2026-11-12. Its log group
+  (`/aws/lambda/AwsJanitorStack-JanitorFn320C9ED7-...`, 25 KB, two years of
+  retention) was retained by the stack and still exists: it is the only record
+  of the weekly runs of the old janitor.
+
+## Still open after Plan 3
+
+- Redeploy without `-c reservedConcurrency=false`, now that the quota allows
+  the detector and the executor their reservation of 1.
+- The expiry path live: the approval of run `20261111T203848Z-138c` expires on
+  2026-11-14 20:09 UTC.
+- The IAM approval route live (it needs `approvalAuth=both` and an approver
+  role in the deploy command).
+- The Elastic IP and Internet Monitor deleters have run against stubs only.
+- Decide what to do with the old stack's log group: read what Plan 4 needs
+  from it (run counts and durations for the README), then delete it.
+- The deployed commit is not shown in the report; a stale deployment is caught
+  by the post-deploy check, not by an alarm.
+- Cosmetic, no behavior a user sees: the four tag-lookup variants of the
+  detector do not share `read_tags`; the "AMI-backed" reason is only set for
+  lab snapshots; the unreachable `attached` reason; `global` as a service
+  label; audit warnings without `runId`; clients built per request in the
+  approval handler and twice in the notifier; `_error_code` duplicated in the
+  executor; `APPROVAL_KEYS` versus the inline `RUN#*` condition; monitor action
+  literals repeated; the policy scan does not cover KMS key policies or
+  `Lambda::Permission` (none present).
 
 ## Plan 4 (story and publication)
 
