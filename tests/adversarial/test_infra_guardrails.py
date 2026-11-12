@@ -1,8 +1,7 @@
 """Surface 7: IAM and state-machine guardrails, synthesized in process (no AWS call).
 
-One stack in the widest configuration (``approvalAuth=both``, a wildcard approver role
-ARN that ``lab_janitor.config`` accepts, live deletions) is searched for grants and data
-flows the per-construct tests do not look at.
+One stack in the widest configuration (``approvalAuth=both``, an approver role, live
+deletions) is searched for grants and data flows the per-construct tests do not look at.
 """
 
 import json
@@ -21,7 +20,7 @@ from tests.infra.helpers import (
     state_machine_definition,
 )
 
-WILDCARD_APPROVER = "arn:aws:iam::123456789012:role/*"
+APPROVER = "arn:aws:iam::123456789012:role/Approver"
 TASK_TOKEN_PATH = "$$.Task.Token"  # noqa: S105 - a JSONPath, not a secret
 APPROVAL_ID_PATH = "$.approvalRequest.approvalId"
 
@@ -34,7 +33,7 @@ def template() -> assertions.Template:
             "approvalEmail": "approver@example.com",
             "dryRun": "false",
             "approvalAuth": "both",
-            "approverRoleArn": WILDCARD_APPROVER,
+            "approverRoleArn": APPROVER,
             "allowedRegions": "us-east-1,eu-west-1",
         }
     )
@@ -115,15 +114,15 @@ def test_execution_input_is_read_once_and_only_into_config(template):
     }
 
 
-def test_wildcard_approver_arn_is_never_used_as_an_iam_principal_or_resource(template):
-    """``-c approverRoleArn=arn:...:role/*`` passes validation. It must stay an inert
-    string in the handler's environment (where it matches nobody), not become a grant."""
+def test_approver_arn_is_never_used_as_an_iam_principal_or_resource(template):
+    """The approver ARN stays a string in the handler's environment, compared in code; it
+    never becomes a grant. (A wildcard ARN is refused at synth: tests/infra/test_config.py.)"""
     document = template.to_json()
     functions = template.find_resources("AWS::Lambda::Function")
     carriers = [
         logical_id
         for logical_id, resource in document["Resources"].items()
-        if WILDCARD_APPROVER in json.dumps(resource)
+        if APPROVER in json.dumps(resource)
     ]
 
     assert len(carriers) == 1
@@ -132,7 +131,7 @@ def test_wildcard_approver_arn_is_never_used_as_an_iam_principal_or_resource(tem
     assert functions[carrier]["Properties"]["Handler"] == "approval.handler.handler"
     assert (
         functions[carrier]["Properties"]["Environment"]["Variables"]["APPROVER_ROLE_ARN"]
-        == WILDCARD_APPROVER
+        == APPROVER
     )
 
 

@@ -16,7 +16,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
@@ -40,6 +40,9 @@ DELETABLE_KINDS = ("ebs-snapshot", "ebs-volume", "elastic-ip", "cw-dashboard", "
 # the callback, so the executor can start while the record is still DECIDING (ruling R11).
 DECIDING_RETRIES = 5
 DECIDING_WAIT_SECONDS = 1
+# Apply starts seconds after the decision. An APPROVED record older than this is
+# a replay (a redrive, a direct invoke): by then other items may pass the live checks.
+APPLY_WINDOW = timedelta(hours=1)
 
 DELETED = "DELETED"
 FAILED = "FAILED"
@@ -90,8 +93,21 @@ def read_approval(
     return found
 
 
-def check_integrity(detect: dict, approval_id: str, plan_sha: str, found) -> None:
-    """Raise ``PlanIntegrityError`` unless the plan read, Detect and the approval all agree."""
+def _decided_within_window(decided_at: str | None, now: datetime) -> bool:
+    try:
+        decided = datetime.fromisoformat(decided_at or "")
+    except ValueError:
+        return False
+    return decided.tzinfo is not None and now - decided <= APPLY_WINDOW
+
+
+def check_integrity(
+    detect: dict, approval_id: str, plan_sha: str, found, now: datetime | None = None
+) -> None:
+    """Raise ``PlanIntegrityError`` unless the plan read, Detect and the approval all agree.
+
+    The approval must also be fresh: decided no longer than ``APPLY_WINDOW`` ago.
+    """
     run_id = detect["runId"]
     if found is None:
         raise PlanIntegrityError(f"run {run_id}: approval record not found")
@@ -103,6 +119,9 @@ def check_integrity(detect: dict, approval_id: str, plan_sha: str, found) -> Non
         "approval belongs to another run": record.run_id == run_id,
         "approval is not APPROVED": record.status == APPROVED,
         "approval id differs": record.approval_id == approval_id,
+        "approval was decided too long ago": _decided_within_window(
+            record.decided_at, now or datetime.now(UTC)
+        ),
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:

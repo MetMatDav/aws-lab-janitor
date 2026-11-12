@@ -32,11 +32,6 @@ def config(**context) -> JanitorConfig:
 # --- cdk context -----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="janitorEnabled only understands 'false'/'False': FALSE, 0, no or off leave the "
-    "Monday schedule enabled while the operator believes the janitor is paused",
-)
 @pytest.mark.parametrize("value", ["FALSE", "0", 0, "no", "off", " false", "false ", "disabled"])
 def test_pause_switch_is_never_silently_ignored(value):
     """Foothold: none, an operator typo. ``_flag`` keeps a flag on for anything it does not
@@ -50,16 +45,12 @@ def test_pause_switch_is_never_silently_ignored(value):
 
 
 @pytest.mark.parametrize("value", ["FALSE", "0", 0, "no", "off", " false", "false ", "f", ""])
-def test_dry_run_survives_every_unrecognised_spelling_of_false(value):
-    """The same rule on its safe side: a typo can never arm a deployment."""
-    assert config(dryRun=value).dry_run is True
+def test_no_unrecognised_spelling_of_false_arms_a_deployment(value):
+    """The same rule for ``dryRun``: a typo fails the synth, it never arms a deployment."""
+    with pytest.raises(ValueError, match="dryRun must be true or false"):
+        config(dryRun=value)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="integer settings go through int(): Arabic-Indic and fullwidth digits, '1_0' and a "
-    "trailing newline are accepted, although the file rejects exactly those in its regexes",
-)
 @pytest.mark.parametrize("key", ["minAgeDays", "scheduleHour"])
 @pytest.mark.parametrize("value", ["\u0667", "\uff17", "1_0", "7\n", "\t7"], ids=ascii)
 def test_integer_settings_accept_only_plain_ascii_digits(key, value):
@@ -67,11 +58,6 @@ def test_integer_settings_accept_only_plain_ascii_digits(key, value):
         config(**{key: value})
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="minAgeDays has no upper bound: a value beyond the calendar passes validation and "
-    "the detector then dies with OverflowError before it sweeps anything",
-)
 @pytest.mark.parametrize("value", [800_000, "1000000", 10**12])
 def test_min_age_days_beyond_the_calendar_is_rejected_at_synth(value):
     with pytest.raises(ValueError, match="minAgeDays"):
@@ -90,11 +76,6 @@ class _Clients:
         return _Sts()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="an execution input with a huge minAgeDays is accepted by load_settings and makes "
-    "the detector crash (OverflowError) instead of falling back to the deployed value",
-)
 @pytest.mark.parametrize("value", [800_000, 10**7, 10**30])
 def test_huge_min_age_days_in_the_execution_input_does_not_crash_the_detector(value):
     """Foothold (c). Fail-safe (nothing is deleted), but the run dies before the sweep."""

@@ -30,9 +30,28 @@ def test_explicit_false_disables_dry_run(value: object, dry_run: bool):
     assert _config(dryRun=value).dry_run is dry_run
 
 
-@pytest.mark.parametrize("value", ["no", 0, "FALSE"])
-def test_other_falsy_looking_values_keep_dry_run(value: object):
-    assert _config(dryRun=value).dry_run is True
+@pytest.mark.parametrize("key", ["dryRun", "janitorEnabled", "reservedConcurrency"])
+@pytest.mark.parametrize("value", ["no", 0, 1, "FALSE", "TRUE", "yes", " false", "", "0"])
+def test_a_flag_that_is_not_true_or_false_fails_the_synth(key: str, value: object):
+    # Guessing either way is wrong for one of them: a typo in dryRun must not
+    # arm deletions, a typo in janitorEnabled must not leave the schedule on.
+    with pytest.raises(ValueError, match=f"{key} must be true or false"):
+        _config(**{key: value})
+
+
+@pytest.mark.parametrize("value", ["true", "True", True])
+def test_flags_accept_the_explicit_true_forms(value: object):
+    config = _config(dryRun=value, janitorEnabled=value, reservedConcurrency=value)
+    assert (config.dry_run, config.janitor_enabled, config.reserved_concurrency) == (
+        True,
+        True,
+        True,
+    )
+
+
+@pytest.mark.parametrize("value", ["false", "False", False])
+def test_explicit_false_pauses_the_janitor(value: object):
+    assert _config(janitorEnabled=value).janitor_enabled is False
 
 
 @pytest.mark.parametrize(
@@ -48,9 +67,9 @@ def test_integer_settings_accept_cli_strings():
     assert (config.min_age_days, config.schedule_hour) == (0, 23)
 
 
-@pytest.mark.parametrize("value", [-1, "-1", "seven", 1.5, True, "2.5"])
+@pytest.mark.parametrize("value", [-1, "-1", "seven", 1.5, True, "2.5", 3651, "3651"])
 def test_invalid_min_age_days_is_rejected(value: object):
-    with pytest.raises(ValueError, match="minAgeDays must be an integer >= 0"):
+    with pytest.raises(ValueError, match="minAgeDays must be an integer in 0..3650"):
         _config(minAgeDays=value)
 
 
@@ -91,6 +110,35 @@ def test_iam_modes_require_a_valid_approver_role_arn(mode: str):
             _config(approvalAuth=mode, approverRoleArn=bad)
     gov = "arn:aws-us-gov:iam::111122223333:role/path/Approver"
     assert _config(approvalAuth=mode, approverRoleArn=gov).approver_role_arn == gov
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "arn:aws:iam::111122223333:role/*",
+        "arn:aws:iam::111122223333:role/a b",
+        "arn:aws:iam::111122223333:role/",
+        "arn:aws:iam::111122223333:role/path/",
+        "arn:aws-:iam::111122223333:role/Approver",
+        "arn:aws:iam::111122223333:role/Approver\r",
+        "arn:aws:iam::111122223333:role/Approver?",
+    ],
+)
+def test_approver_role_arn_names_one_role_with_iam_characters_only(value: str):
+    with pytest.raises(ValueError, match="approverRoleArn"):
+        _config(approvalAuth="iam", approverRoleArn=value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "arn:aws:iam::111122223333:role/Approver",
+        "arn:aws:iam::111122223333:role/team/sub/Approver_1+=,.@-x",
+        "arn:aws-cn:iam::111122223333:role/Approver",
+    ],
+)
+def test_approver_role_arn_accepts_paths_and_every_iam_name_character(value: str):
+    assert _config(approvalAuth="iam", approverRoleArn=value).approver_role_arn == value
 
 
 def test_allowed_regions_from_comma_string_and_list():
@@ -155,6 +203,22 @@ def test_allowed_regions_must_include_us_east_1():
         "eu-west-1",
         "us-east-1",
     )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["a,b@example.com", "<a>@example.com", '"a"@example.com', "a@example..com", "a@.example.com"],
+)
+def test_email_shapes_sns_would_refuse_at_deploy_fail_the_synth(value: str):
+    with pytest.raises(ValueError, match="reportEmail must be an email address"):
+        _config(reportEmail=value)
+
+
+@pytest.mark.parametrize(
+    "value", ["first.last+tag@example.com", "a_b%c-d@mail.example.com", "A1@EXAMPLE.COM"]
+)
+def test_ordinary_email_shapes_are_accepted(value: str):
+    assert _config(reportEmail=value).report_email == value
 
 
 @pytest.mark.parametrize("value", ["a@example.com\n", "a@exämple.com", "a b@example.com"])

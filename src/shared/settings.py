@@ -1,10 +1,15 @@
 """Runtime settings for the janitor Lambdas."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 MIN_PREFIX_LENGTH = 3
 DEFAULT_MIN_AGE_DAYS = "7"
+# Ten years, the same cap as the ``minAgeDays`` context value (lab_janitor/config.py).
+# Beyond the calendar the detector's date arithmetic overflows.
+MAX_MIN_AGE_DAYS = 3650
+_DIGITS = re.compile(r"[0-9]{1,9}", re.ASCII)
 DEFAULT_REGION = "us-east-1"
 
 
@@ -28,15 +33,11 @@ class Settings:
 
 
 def _env_min_age_days(env: Mapping[str, str]) -> int:
-    """``MIN_AGE_DAYS`` from the environment; a non-integer or negative value is an error."""
+    """``MIN_AGE_DAYS`` from the environment; anything but ASCII digits in range is an error."""
     raw = env.get("MIN_AGE_DAYS", DEFAULT_MIN_AGE_DAYS)
-    try:
-        value = int(raw)
-    except ValueError:
-        value = -1
-    if value < 0:
-        raise ValueError(f"MIN_AGE_DAYS must be an integer >= 0, got {raw!r}")
-    return value
+    if not _DIGITS.fullmatch(raw) or int(raw) > MAX_MIN_AGE_DAYS:
+        raise ValueError(f"MIN_AGE_DAYS must be an integer in 0..{MAX_MIN_AGE_DAYS}, got {raw!r}")
+    return int(raw)
 
 
 def load_settings(event: dict, env: Mapping[str, str]) -> Settings:
@@ -50,7 +51,11 @@ def load_settings(event: dict, env: Mapping[str, str]) -> Settings:
     dry_run = config.get("dryRun") is not False
 
     min_age = config.get("minAgeDays")
-    if isinstance(min_age, int) and not isinstance(min_age, bool) and min_age >= 0:
+    if (
+        isinstance(min_age, int)
+        and not isinstance(min_age, bool)
+        and 0 <= min_age <= MAX_MIN_AGE_DAYS
+    ):
         min_age_days = min_age
     else:
         min_age_days = _env_min_age_days(env)

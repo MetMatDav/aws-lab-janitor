@@ -1,6 +1,6 @@
 import inspect
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -44,7 +44,8 @@ def record(**overrides) -> ApprovalRecord:
         "created_at": "2026-11-02T12:00:00+00:00",
         "expires_at": "2026-11-05T11:30:00+00:00",
         "approved_by": {"mode": "link"},
-        "decided_at": "2026-11-02T13:00:00+00:00",
+        # Fresh: the executor refuses an approval decided more than an hour ago.
+        "decided_at": (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
     }
     values.update(overrides)
     return ApprovalRecord(**values)
@@ -572,3 +573,33 @@ def test_task_token_is_never_logged(make_harness, caplog):
 def test_executor_has_no_main():
     for module in (handler_module, verify, deleters):
         assert "__main__" not in inspect.getsource(module)
+
+
+DECIDED = datetime(2026, 11, 2, 13, 0, tzinfo=UTC)
+
+
+def _integrity(decided_at: str | None, now: datetime) -> None:
+    found = (record(decided_at=decided_at), "task-token")
+    handler_module.check_integrity(
+        {"runId": RUN_ID, "planSha256": SHA}, APPROVAL_ID, SHA, found, now
+    )
+
+
+def test_approval_decided_within_the_hour_is_applied():
+    _integrity(DECIDED.isoformat(), DECIDED + timedelta(minutes=59, seconds=59))
+
+
+@pytest.mark.parametrize(
+    "decided_at",
+    [
+        DECIDED.isoformat(),
+        None,
+        "",
+        "yesterday",
+        # No offset: it cannot be compared with the clock, so it is not trusted.
+        DECIDED.replace(tzinfo=None).isoformat(),
+    ],
+)
+def test_stale_or_undated_approval_is_refused(decided_at):
+    with pytest.raises(PlanIntegrityError, match="approval was decided too long ago"):
+        _integrity(decided_at, DECIDED + timedelta(hours=1, seconds=1))

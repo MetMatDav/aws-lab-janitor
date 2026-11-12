@@ -56,7 +56,8 @@ def approved_record(**overrides) -> ApprovalRecord:
         "created_at": "2026-11-02T12:00:00+00:00",
         "expires_at": "2026-11-05T11:30:00+00:00",
         "approved_by": {"mode": "link"},
-        "decided_at": "2026-11-02T13:00:00+00:00",
+        # Fresh: the executor refuses an approval decided more than an hour ago.
+        "decided_at": (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
     }
     values.update(overrides)
     return ApprovalRecord(**values)

@@ -22,6 +22,8 @@ ALREADY_GONE = "already-gone"
 NOT_LAB_TAGGED = "not-lab-tagged"
 NAME_PREFIX_MISMATCH = "name prefix mismatch"
 AGE_UNKNOWN = "age unknown"
+AMI_LOOKUP_INCOMPLETE = "AMI lookup incomplete"
+ARN_MISMATCH = "arn does not name this dashboard"
 
 
 def client_for(clients, service: str, item: dict) -> BaseClient:
@@ -87,13 +89,17 @@ def _snapshot(item: dict, clients, settings: Settings, now: datetime) -> str | N
     if blocker:
         return blocker
     # Disabled AMIs are hidden by default but still pin their snapshots.
-    images = ec2.describe_images(
+    response = ec2.describe_images(
         Owners=["self"],
         IncludeDisabled=True,
         Filters=[{"Name": "block-device-mapping.snapshot-id", "Values": [snapshot_id]}],
-    )["Images"]
+    )
+    images = response["Images"]
     if images:
         return f"backs AMI {images[0]['ImageId']}"
+    # An empty page with more to come is not an answer.
+    if response.get("NextToken"):
+        return AMI_LOOKUP_INCOMPLETE
     return None
 
 
@@ -138,6 +144,9 @@ def _address(item: dict, clients, settings: Settings, _now: datetime) -> str | N
 def _dashboard(item: dict, clients, settings: Settings, _now: datetime) -> str | None:
     if not item["resourceId"].startswith(settings.name_prefix):
         return NAME_PREFIX_MISMATCH
+    # The tags are read by ARN and the delete goes by name: both must be one dashboard.
+    if not (item.get("arn") or "").endswith(f":dashboard/{item['resourceId']}"):
+        return ARN_MISMATCH
     cloudwatch = client_for(clients, "cloudwatch", item)
     try:
         tags = cloudwatch.list_tags_for_resource(ResourceARN=item["arn"]).get("Tags", [])

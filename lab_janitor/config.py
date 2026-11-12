@@ -15,9 +15,13 @@ from typing import Any
 from constructs import Node
 
 DEFAULT_MIN_AGE_DAYS = 7
+# Ten years. Beyond the calendar the detector's date arithmetic overflows; the
+# Lambdas apply the same cap to the execution input (shared/settings.py).
+MAX_MIN_AGE_DAYS = 3650
 DEFAULT_SCHEDULE_TIMEZONE = "America/Bogota"
 DEFAULT_SCHEDULE_HOUR = 9
-_FALSY_FLAGS = ("false", "False")
+_TRUE_FLAGS = (True, "true", "True")
+_FALSE_FLAGS = (False, "false", "False")
 MAX_SCHEDULE_HOUR = 23
 APPROVAL_AUTH_MODES = ("link", "iam", "both")
 DEFAULT_APPROVAL_AUTH = "link"
@@ -26,11 +30,17 @@ DEFAULT_CREATE_TRAIL = "full"
 # The executor reaches global services (CloudWatch dashboards) through this region.
 GLOBAL_SERVICES_REGION = "us-east-1"
 # Matched with fullmatch and re.ASCII: "$" would accept a trailing newline, and a
-# bare \d would accept non-ASCII digits. An email part is printable ASCII
-# without "@" or spaces.
+# bare \d would accept non-ASCII digits.
 _REGION = re.compile(r"[a-z]{2}(-[a-z]+)+-\d", re.ASCII)
-_ROLE_ARN = re.compile(r"arn:aws[a-z-]*:iam::\d{12}:role/.+", re.ASCII)
-_EMAIL = re.compile(r"[!-?A-~]+@[!-?A-~]+\.[!-?A-~]+", re.ASCII)
+# One role: an optional path and a name, in the characters IAM allows for them.
+_ROLE_ARN = re.compile(
+    r"arn:aws(-[a-z]+)*:iam::\d{12}:role/([A-Za-z0-9_+=,.@-]+/)*[A-Za-z0-9_+=,.@-]+", re.ASCII
+)
+# One plain address. Stricter than the RFC on purpose: quotes, commas and angle
+# brackets pass a looser check and then fail at deploy, or name a second recipient.
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+", re.ASCII)
+# Bounded: int() itself refuses strings of thousands of digits with another message.
+_INTEGER = re.compile(r"-?[0-9]{1,9}", re.ASCII)
 
 
 def _context(node: Node, key: str, default: Any) -> Any:
@@ -42,32 +52,39 @@ def _context(node: Node, key: str, default: Any) -> Any:
 def _int_in_range(key: str, value: Any, low: int, high: int | None = None) -> int:
     """Parse an integer context value and check ``low <= value <= high``.
 
-    Context passed with ``-c key=value`` arrives as a string, so decimal digit
-    strings are accepted; booleans, floats and anything out of range are not.
+    Context passed with ``-c key=value`` arrives as a string, so strings of
+    ASCII digits are accepted; booleans, floats, anything ``int()`` would
+    forgive (other digits, ``1_0``, spaces, a sign) and anything out of range
+    are not.
     """
     expected = f">= {low}" if high is None else f"in {low}..{high}"
     if isinstance(value, bool) or not isinstance(value, int | str):
         raise ValueError(f"{key} must be an integer {expected}, got {value!r}")
-    try:
-        number = int(value)
-    except ValueError:
-        raise ValueError(f"{key} must be an integer {expected}, got {value!r}") from None
+    if isinstance(value, str) and not _INTEGER.fullmatch(value):
+        raise ValueError(f"{key} must be an integer {expected}, got {value!r}")
+    number = int(value)
     if number < low or (high is not None and number > high):
         raise ValueError(f"{key} must be an integer {expected}, got {value!r}")
     return number
 
 
-def _flag(value: Any, *, default: bool) -> bool:
+def _flag(key: str, value: Any, *, default: bool) -> bool:
     """Parse a boolean context value.
 
     Context passed with ``-c key=value`` arrives as a string, while context
-    set in ``cdk.json`` or a test ``App`` can be a real boolean. Only the
-    explicit falsy forms disable a flag; anything else keeps it on, so a typo
-    never turns off a safety setting such as ``dryRun``.
+    set in ``cdk.json`` or a test ``App`` can be a real boolean. Anything else
+    is an error: guessing would arm deletions on a mistyped ``dryRun`` or
+    leave the schedule running on a mistyped ``janitorEnabled``.
     """
     if value is None:
         return default
-    return not (value is False or value in _FALSY_FLAGS)
+    # ``0 == False`` in Python: compare the type too.
+    if isinstance(value, bool | str):
+        if value in _TRUE_FLAGS:
+            return True
+        if value in _FALSE_FLAGS:
+            return False
+    raise ValueError(f"{key} must be true or false, got {value!r}")
 
 
 def _regions(value: Any) -> tuple[str, ...]:
@@ -174,9 +191,12 @@ class JanitorConfig:
             approval_email=_email(
                 "approvalEmail", node.try_get_context("approvalEmail") or report_email
             ),
-            dry_run=_flag(node.try_get_context("dryRun"), default=True),
+            dry_run=_flag("dryRun", node.try_get_context("dryRun"), default=True),
             min_age_days=_int_in_range(
-                "minAgeDays", _context(node, "minAgeDays", DEFAULT_MIN_AGE_DAYS), 0
+                "minAgeDays",
+                _context(node, "minAgeDays", DEFAULT_MIN_AGE_DAYS),
+                0,
+                MAX_MIN_AGE_DAYS,
             ),
             schedule_timezone=_context(node, "scheduleTimezone", DEFAULT_SCHEDULE_TIMEZONE),
             schedule_hour=_int_in_range(
@@ -185,8 +205,12 @@ class JanitorConfig:
                 0,
                 MAX_SCHEDULE_HOUR,
             ),
-            janitor_enabled=_flag(node.try_get_context("janitorEnabled"), default=True),
-            reserved_concurrency=_flag(node.try_get_context("reservedConcurrency"), default=True),
+            janitor_enabled=_flag(
+                "janitorEnabled", node.try_get_context("janitorEnabled"), default=True
+            ),
+            reserved_concurrency=_flag(
+                "reservedConcurrency", node.try_get_context("reservedConcurrency"), default=True
+            ),
             allowed_regions=_regions(node.try_get_context("allowedRegions")),
             approval_auth=approval_auth,
             approver_role_arn=_approver_role_arn(

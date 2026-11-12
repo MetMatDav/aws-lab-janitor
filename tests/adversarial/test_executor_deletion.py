@@ -259,11 +259,6 @@ def test_api_error_during_verification_fails_the_item_and_deletes_nothing(monkey
     assert aws.mutations == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="latent: a describe_images answer carrying NextToken is treated as the complete "
-    "answer, so the snapshot is deleted without reading the remaining pages",
-)
 def test_truncated_ami_lookup_is_not_treated_as_no_ami(monkeypatch):
     """Foothold: none known. EC2 does not paginate DescribeImages unless MaxResults is sent,
     so this needs an API behaviour change; the check simply never looks at NextToken."""
@@ -537,11 +532,6 @@ def test_integrity_message_names_every_disagreement_but_no_secret(monkeypatch):
     assert "task-token" not in message
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="an APPROVED record never goes stale: invoking Apply again weeks later (redrive, "
-    "direct invoke) re-applies the old plan to whatever passes the live checks by then",
-)
 def test_apply_replayed_long_after_the_approval_is_refused(monkeypatch):
     """Foothold (c) plus lambda:InvokeFunction or states:RedriveExecution.
 
@@ -567,11 +557,6 @@ def test_apply_replayed_long_after_the_approval_is_refused(monkeypatch):
     assert result["deleted"] == 0
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="latent: the dashboard keep-tag check reads the plan item's arn but the delete uses "
-    "its resourceId; when they name different dashboards the kept one is deleted",
-)
 def test_dashboard_keep_tag_is_read_from_the_dashboard_that_gets_deleted():
     """Foothold: a forged plan, which the sha256 check stops today (defence in depth).
 

@@ -41,10 +41,19 @@ def test_boolean_min_age_is_ignored():
     assert load_settings({"config": {"minAgeDays": True}}, os.environ).min_age_days == 7
 
 
-@pytest.mark.parametrize("value", ["-1", "seven"])
+@pytest.mark.parametrize("value", [3651, 800_000, 10**30])
+def test_min_age_beyond_the_cap_in_the_event_falls_back_to_the_deployed_value(value):
+    assert load_settings({"config": {"minAgeDays": value}}, os.environ).min_age_days == 7
+
+
+def test_min_age_at_the_cap_is_honoured():
+    assert load_settings({"config": {"minAgeDays": 3650}}, os.environ).min_age_days == 3650
+
+
+@pytest.mark.parametrize("value", ["-1", "seven", "\u0663", "1_0", " 7", "7\n", "+7", "3651"])
 def test_invalid_env_min_age_is_rejected(value):
     env = dict(os.environ, MIN_AGE_DAYS=value)
-    with pytest.raises(ValueError, match="MIN_AGE_DAYS must be an integer >= 0"):
+    with pytest.raises(ValueError, match="MIN_AGE_DAYS must be an integer in 0..3650"):
         load_settings({}, env)
 
 
