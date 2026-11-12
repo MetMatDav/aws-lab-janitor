@@ -47,3 +47,4 @@ cannot go unnoticed.
   `ApprovalStoreMachine`.
 - [tests/property/test_verify_props.py](../../tests/property/test_verify_props.py):
   `test_detector_and_recheck_agree`.
+- [docs/testing.md](../testing.md).

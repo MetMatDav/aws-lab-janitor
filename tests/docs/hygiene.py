@@ -11,10 +11,16 @@ import subprocess
 import sys
 from pathlib import Path
 
-# The owner's account id, real resource names, SSO profile and mailbox name,
+# The owner's account id, real resource names, SSO profile and mailbox name, and
+# the globally addressable names of the deployed stack (its buckets, its API host),
 # as sha256 of the lowercased token: the list forbids them without holding them.
 FORBIDDEN_SHA256 = frozenset(
     {
+        "7c1ade1f7be0e5d9a6a69eda55798a16b8dbcb13f266fbeff51513ffc6e48f5d",
+        "14b521b300eebc22e08566d20663d57682731a279e4d972219a3e3a2f19ca12c",
+        "89e7dbcfc14130c45ea9c90df6159ea32371104aa0c70df414590f6768bd2999",
+        "633a452e948265d56b8f2f7d98f203e4cf483eb2e6fd40923829685215669e14",
+        "61845ae6a9ab3508d34275e85c46dad20f722e573ac037dfcf5c7aae95dc0450",
         "d488c164deadcc9e7a6aa38a93a2c25dfead8355c845aa9c0dc5e38b8343f586",
         "a1fca76c3213af12e03cd70f2d6f7fc9abd0cce461c8eef8d273e82c2ed1626c",
         "0a3d306a5c2a5cc6da279807140a63334b45d8849ba462551f23ccd2bd049ebf",

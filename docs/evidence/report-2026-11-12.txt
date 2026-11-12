@@ -1,0 +1,36 @@
+The report stored by the detector for run 20261112T195659Z-bbb8, as emailed. The names of the
+owner's four real resources, the distribution's domain and the bucket name are replaced.
+
+LAB JANITOR WEEKLY REPORT
+Run: 20261112T195659Z-bbb8
+Mode: LIVE
+Regions swept: 25
+Findings: 8
+Candidates for deletion: 3
+Estimated fixed monthly cost of everything detected: ~$0.18
+
+ACTIONABLE
+[cw-dashboard] LAB-decoy (global) 0d name prefix LAB-
+[ebs-snapshot] snap-0c95095ead1c139ec (us-east-1) 0d tag Purpose=lab, 0 days old, not referenced by any AMI ~$0.05/mo
+[ebs-volume] vol-0001e0237f1d10359 (us-east-1) 0d tag Purpose=lab, available, 0 days old ~$0.08/mo
+
+INVENTORY
+[cloudfront] 1 resources
+  EXAMPLEDISTRIBUTION (global) 6d dexample.cloudfront.net enabled=True
+[cw-dashboard] 1 resources
+  example-dashboard (global) 74d dashboard
+[ebs-snapshot] 1 resources
+  snap-069661b86a0bdf3b6 (us-east-1) 0d ~$0.05/mo 1 GiB from vol-0001e0237f1d10359
+[s3-bucket] 2 resources
+  example-bucket-1 (global) 117d bucket
+  example-bucket-2 (global) 28d bucket
+
+ERRORS
+ap-east-2 internetmonitor:ListMonitors service-unavailable-in-region: Could not connect to the endpoint URL: "https://internetmonitor.ap-east-2.amazonaws.com/v20210603/Monitors"
+ap-southeast-5 internetmonitor:ListMonitors service-unavailable-in-region: Could not connect to the endpoint URL: "https://internetmonitor.ap-southeast-5.amazonaws.com/v20210603/Monitors"
+mx-central-1 internetmonitor:ListMonitors service-unavailable-in-region: Could not connect to the endpoint URL: "https://internetmonitor.mx-central-1.amazonaws.com/v20210603/Monitors"
+
+REGIONS WITH NOTHING FOUND
+af-south-1, ap-east-1, ap-northeast-1, ap-northeast-2, ap-northeast-3, ap-south-1, ap-south-2, ap-southeast-1, ap-southeast-2, ap-southeast-3, ap-southeast-4, ca-central-1, eu-central-1, eu-north-1, eu-west-1, eu-west-2, eu-west-3, sa-east-1, us-east-2, us-west-1, us-west-2
+
+Full plan: s3://<PlansBucketName>/plans/20261112T195659Z-bbb8/plan.json
