@@ -359,7 +359,7 @@ class _RecordingTable:
     strict=True,
     reason="the approval record's partition key is the bearer id itself: whoever can read the "
     "audit table or the CloudTrail data events the stack records for it (item keys are "
-    "logged in clear) can open the link and approve; docs/runbook.md accepts this today",
+    "logged in clear) can open the link and approve. Accepted: docs/known-limitations.md 1",
 )
 def test_no_dynamodb_key_carries_the_approval_id_in_clear():
     """Foothold: read-only access to the audit table or to the trail's log bucket, in the

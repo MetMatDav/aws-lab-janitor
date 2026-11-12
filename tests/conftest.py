@@ -1,4 +1,13 @@
+import os
+
 import pytest
+from hypothesis import settings as hypothesis_settings
+
+# Property tests (tests/property): no per-example deadline, because the first
+# example pays for imports. "ci" is derandomized so a red build can be reproduced.
+hypothesis_settings.register_profile("dev", deadline=None, max_examples=100)
+hypothesis_settings.register_profile("ci", deadline=None, max_examples=300, derandomize=True)
+hypothesis_settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
 
 
 @pytest.fixture(scope="session", autouse=True)

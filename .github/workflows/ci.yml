@@ -24,6 +24,8 @@ jobs:
         run: ruff check . && ruff format --check .
       - name: Test
         run: pytest -q
+        env:
+          HYPOTHESIS_PROFILE: ci
       - name: CDK synth (cdk-nag, strict)
         # cdk.json runs "python3 app.py": setup-python's python3, which has the pip installs.
         run: npx cdk synth --strict --quiet -c reportEmail=ci@example.com

@@ -175,7 +175,8 @@ class _Clock(FakeContext):
 @pytest.mark.xfail(
     strict=True,
     reason="once the time budget trips, the executor still makes two AWS writes for every "
-    "remaining item with no bound: a few thousand leftovers outlast the 30 s reserve",
+    "remaining item with no bound: a few thousand leftovers outlast the 30 s reserve. "
+    "Accepted: docs/known-limitations.md 3",
 )
 def test_recording_the_leftovers_fits_in_the_reserve_the_executor_kept(monkeypatch):
     """Foothold (b) plus an approver who accepts a plan of thousands of items.
@@ -207,7 +208,8 @@ class _PlanStore:
 @pytest.mark.xfail(
     strict=True,
     reason="the detector writes one audit item per finding (more for candidates) after the "
-    "sweep, with no time check: enough findings overrun the 120 s reserve and the run dies",
+    "sweep, with no time check: enough findings overrun the 120 s reserve and the run dies. "
+    "Accepted: docs/known-limitations.md 2",
 )
 def test_audit_writes_of_a_crowded_account_fit_in_the_reserve_the_detector_kept(monkeypatch):
     """Foothold (b) alone: no approval is involved, any resource the sweep lists counts.

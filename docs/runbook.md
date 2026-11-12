@@ -107,6 +107,8 @@ calls on the approval record (`pk` `APPROVAL#<approvalId>`) therefore do not
 match a run id; search for the approval id to see who created, claimed and
 closed an approval. It also means the trail's log bucket holds approval ids in
 clear, like the audit table does: keep read access to both equally narrow.
+[Known limitations](known-limitations.md) explains what a reader of those ids
+could do and what closing that would take.
 
 The deletions themselves (`DeleteSnapshot`, `DeleteVolume`, `ReleaseAddress`,
 `DeleteDashboards`, `DeleteMonitor`) are management events. Event history keeps
@@ -194,6 +196,11 @@ Approval settings are context values too (all optional):
   nothing else happens.
 - `dryRun`: defaults to `true`. Only `-c dryRun=false` arms the executor
   (`DELETIONS_ENABLED=true`) and makes the Monday run ask for approval.
+- The three flags (`dryRun`, `janitorEnabled`, `reservedConcurrency`) accept
+  `true` or `false` and nothing else. `FALSE`, `0`, `no` or a stray space fail
+  the synth with `<flag> must be true or false`, so a typo is never guessed.
+- `minAgeDays`: 0 to 3650, default 7. An execution input outside that range
+  is ignored and the deployed value is used.
 
 `--require-approval broadening` makes the CDK stop and ask before applying IAM
 or security-group broadening, so a human reviews those changes on the first
@@ -376,7 +383,7 @@ JSON):
 | `409` | Already decided. A second decision never changes the first. |
 | `410` | The approval expired (after the approval window: 71 h 30 min; the state machine waits 72 h). Nothing will be deleted for this run. |
 | `500` | The decision was not recorded: Step Functions refused the callback and the claim was put back to `PENDING`. Retry in a few minutes. |
-| `504` | Step Functions did not answer, so the decision may or may not have been delivered. The record stays `DECIDING` and every later attempt gets `409`. Look for the result or rejection email; if the run is still waiting after a few minutes, see [A decision left in DECIDING](#a-decision-left-in-deciding). |
+| `504` | Step Functions did not answer, or something failed after the claim, so the decision may or may not have been delivered. The record stays `DECIDING` and every later attempt gets `409`. Look for the result or rejection email; if the run is still waiting after a few minutes, see [A decision left in DECIDING](#a-decision-left-in-deciding). |
 
 To follow one approval in the audit table (`AuditTableName`):
 
@@ -567,6 +574,8 @@ npx cdk deploy LabJanitorStack --require-approval broadening \
 ```
 
 To resume, redeploy without `-c janitorEnabled=false` (it defaults to `true`).
+The value must be exactly `false`: anything else fails the synth instead of
+leaving the schedule on.
 Both commands need the rest of your flags too (`createTrail`, `dryRun`; see
 [Deploy in dry-run](#deploy-in-dry-run)).
 
@@ -715,6 +724,14 @@ A confirmed subscription existed when the notifier published, and it logged
 `NumberOfNotificationsDelivered` and `NumberOfNotificationsFailed` of the topic
 for that minute: a failed delivery is redriven to the dead-letter queue and
 raises `DlqNotEmpty`.
+
+### Apply failed with `approval was decided too long ago`
+
+The executor applies an approval only within one hour of the decision. A
+redrive of a failed execution, or an invocation by hand, after that hour is
+refused with this message and nothing is deleted: by then resources that were
+skipped the first time may pass the live checks, and nobody approved deleting
+them now. Start a new run and approve its plan.
 
 ### Deploy fails on reserved concurrency
 

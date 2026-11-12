@@ -131,3 +131,49 @@ Record in the runbook. Open after it:
 - `ExecutionFailed` stayed in `ALARM` for 15 minutes on a 5 minute period. Not
   a problem; the runbook should not promise a faster recovery.
 - Still unit tests only: the IAM approval route.
+
+## Review passes of 2026-11-12 (property review and adversarial suite)
+
+Two agents reviewed the code before the cutover. One read the tests against
+property-based testing (no test was property-based; three counterexamples
+found by random inputs). The other attacked the code from three footholds and
+left `tests/adversarial/` (485 passing tests that pin defences, strict xfail
+for what broke). No way to delete something outside an approved, re-verified
+plan was found.
+
+Fixed the same day:
+
+- Executor: an `APPROVED` record decided more than an hour ago is refused
+  (replay by redrive or direct invoke); an AMI lookup that reports more pages
+  and a dashboard whose ARN does not name the dashboard being deleted are
+  skipped.
+- Config: flags accept only `true` or `false` (a mistyped `janitorEnabled`
+  left the schedule on); `minAgeDays` capped at 3650 in the context and in the
+  execution input (a huge value crashed the detector); integers must be ASCII
+  digits; the approver role ARN and the emails accept only the shapes IAM and
+  SNS accept.
+- Emails: ids, kinds, regions, reasons and the approver line go through
+  `shared.text.one_line`, which collapses every Unicode line break and drops
+  control and format characters (a User-Agent could forge lines in the outcome
+  email); the weekly subject says "1 candidate".
+- Approval endpoint: any failure after the claim other than a refused callback
+  answers `504`; the catch-all logs an AWS error code, never its message; the
+  confirmation code is compared as ASCII.
+- IAM: the detector's `dynamodb:Query` grant names the index only.
+- Plan: findings that share an identity are ordered by their whole content, so
+  the same findings always hash to the same plan.
+- Property tests with `hypothesis` under `tests/property/`.
+
+Not fixed, by decision of the owner, and written up with the fix each would
+need in `docs/known-limitations.md`: the approval id readable in the audit
+table, CloudTrail and the execution history; the detector's and the executor's
+audit writes outside their time budget with thousands of resources.
+
+Left as they are, pinned by tests: the keep tag matches exactly; an empty
+`allowedRegions` means every region.
+
+Not covered by either pass: live AWS behaviour (EC2 tag character set, what
+SNS does with control characters, API Gateway header decoding), Step Functions
+semantics (`States.JsonMerge`, redrive), `scripts/approve.py` beyond its host
+pattern (it signs a request to whatever https host `--url` names), the other
+detectors, the reminder flow.
