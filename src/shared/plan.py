@@ -18,8 +18,11 @@ def new_run_id(now: datetime) -> str:
     return f"{now.astimezone(UTC).strftime(RUN_ID_TIME_FORMAT)}-{uuid.uuid4().hex[:4]}"
 
 
-def _finding_key(finding: Finding) -> tuple[str, str, str, str]:
-    return (finding.region, finding.kind, finding.resource_id, finding.arn or "")
+def _finding_key(finding: Finding) -> tuple[str, str, str, str, str]:
+    # The whole finding is the last element: two findings with one identity but
+    # different details would otherwise keep the order they arrived in.
+    whole = json.dumps(finding.to_dict(), sort_keys=True, default=str)
+    return (finding.region, finding.kind, finding.resource_id, finding.arn or "", whole)
 
 
 def _error_key(error: ErrorFinding) -> tuple[str, str, str, str]:

@@ -162,18 +162,17 @@ class AuditStore(Construct):
         )
 
     def grant_resource_queries(self, grantee: iam.IGrantable) -> iam.Grant:
-        """Allow ``grantee`` to query the table and the ``by-resource`` index.
+        """Allow ``grantee`` to query the ``by-resource`` index, and only the index.
 
         Intentionally without a ``dynamodb:LeadingKeys`` condition: the GSI is
         keyed by ``resourceId``, not ``pk``, so a ``RUN#*`` restriction would
-        block every lookup of a resource's history. Query is read-only, so the
-        broader scope does not let the grantee alter the trail.
+        block every lookup of a resource's history. The table itself is left
+        out: a Query on the table could read an ``APPROVAL#`` partition, task
+        token included, and approval records have no ``resourceId``, so they
+        are not in the index. IAM authorizes an index query on the index ARN.
         """
         return iam.Grant.add_to_principal(
             grantee=grantee,
             actions=["dynamodb:Query"],
-            resource_arns=[
-                self.table.table_arn,
-                f"{self.table.table_arn}/index/{RESOURCE_INDEX}",
-            ],
+            resource_arns=[f"{self.table.table_arn}/index/{RESOURCE_INDEX}"],
         )

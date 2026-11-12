@@ -170,3 +170,15 @@ def test_candidate_dict_carries_eligible():
     assert list(eip)[list(eip).index("candidate") + 1] == "eligible"
     assert finding("nat-1").to_dict()["eligible"] is False
     assert plan["inventory"][0]["eligible"] is False
+
+
+def test_plan_bytes_ignore_the_order_of_findings_that_share_an_identity():
+    # Same region, kind, id and arn (a listing that returned an item twice with
+    # different details): the identity alone does not order them.
+    first = finding("nat-1", detail="a")
+    second = replace(first, detail="b")
+
+    forward = plan_bytes(make_plan([first, second], []))
+    backward = plan_bytes(make_plan([second, first], []))
+
+    assert forward == backward

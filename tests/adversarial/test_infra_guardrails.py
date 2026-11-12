@@ -158,12 +158,6 @@ def test_region_lock_covers_every_delete_grant_when_regions_are_configured(templ
     assert checked == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the detector's dynamodb:Query grant covers the base table, not only the "
-    "by-resource index it uses: the sweep role can read an APPROVAL# record, task token "
-    "included, by querying its partition key",
-)
 def test_detector_can_query_only_the_index_it_uses(template):
     """Foothold: code running as the detector role that knows a pending approval id.
 

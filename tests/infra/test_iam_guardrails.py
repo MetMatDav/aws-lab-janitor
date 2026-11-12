@@ -170,14 +170,13 @@ def test_detector_dynamodb_write_grants_carry_leading_keys(template: assertions.
         assert st["Condition"] == {"ForAllValues:StringLike": {"dynamodb:LeadingKeys": ["RUN#*"]}}
 
 
-def test_detector_query_grant_is_limited_to_table_and_index(template: assertions.Template):
+def test_detector_query_grant_is_limited_to_the_index(template: assertions.Template):
+    # Not the table: a Query on the table could read an APPROVAL# partition,
+    # task token included. Approval records are not in the index.
     queries = _allow_statements_with(detector_statements(template), "dynamodb:Query")
     assert len(queries) == 1
     (query,) = queries
-    assert resources(query) == [
-        TABLE_ARN,
-        {"Fn::Join": ["", [TABLE_ARN, "/index/by-resource"]]},
-    ]
+    assert resources(query) == [{"Fn::Join": ["", [TABLE_ARN, "/index/by-resource"]]}]
 
 
 def test_plans_bucket_policy_denies_put_except_detector_role(template: assertions.Template):

@@ -1003,28 +1003,20 @@
             {
               "Action": "dynamodb:Query",
               "Effect": "Allow",
-              "Resource": [
-                {
-                  "Fn::GetAtt": [
-                    "AuditTable18A3095C",
-                    "Arn"
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AuditTable18A3095C",
+                        "Arn"
+                      ]
+                    },
+                    "/index/by-resource"
                   ]
-                },
-                {
-                  "Fn::Join": [
-                    "",
-                    [
-                      {
-                        "Fn::GetAtt": [
-                          "AuditTable18A3095C",
-                          "Arn"
-                        ]
-                      },
-                      "/index/by-resource"
-                    ]
-                  ]
-                }
-              ]
+                ]
+              }
             }
           ],
           "Version": "2012-10-17"
