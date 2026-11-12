@@ -1,10 +1,12 @@
 # Deployment runbook
 
-How to deploy the lab janitor in dry-run mode, approve a plan and check that it
-works. As of Plan 2 the stack detects, reports, asks the owner for approval and
-runs the executor, but deletions stay disabled until Plan 3: unless you deploy
-with `-c dryRun=false`, every approved item is recorded as `SKIPPED` with the
-reason `deletions-disabled`. Placeholders: `<account-id>` is the 12-digit AWS account id, `you@example.com`
+How to deploy the lab janitor, approve a plan and check that it works. The
+stack detects, reports, asks the owner for approval and runs the executor.
+Deleting takes two switches and a person. The stack must be deployed with
+`-c dryRun=false`, which arms the executor and makes the weekly schedule ask
+for approval; the execution input must say `"dryRun": false`; and the owner
+must approve the plan. With the default `dryRun=true` every approved item is
+recorded as `SKIPPED` with the reason `deletions-disabled`. Placeholders: `<account-id>` is the 12-digit AWS account id, `you@example.com`
 is the mailbox that receives the reports and alerts.
 
 ## Prerequisites
@@ -562,6 +564,19 @@ deletions disabled. Decoy `LAB-decoy-plan3`, deleted by hand afterwards.
 
 Not exercised: the expiry path (pending, see above), the IAM route, and a
 `POST` on a decided approval (seen on 2026-11-11).
+
+### Cutover record: 2026-11-12
+
+- 18:32 UTC: the old stack (`AwsJanitorStack`, a single Lambda that deleted
+  marked resources with no approval) was redeployed in report-only mode
+  (`DRY_RUN=true`). From then on nothing in the account deleted anything.
+- 19:51 UTC: this stack was redeployed with `-c dryRun=false`. Checked
+  afterwards: executor `DELETIONS_ENABLED=true`, schedule `ENABLED` with input
+  `{"dryRun":false,"minAgeDays":7}`, four alarms `OK`.
+- 19:53 to 20:01 UTC: controlled deletion test with decoys, the first real
+  deletion. Three decoys deleted after approval, a keep-tagged snapshot left
+  alone. Record: `docs/evidence/controlled-deletion-2026-11-12.md`.
+- The old stack is destroyed once a weekly run of this one has gone through.
 
 ## Pause and resume
 

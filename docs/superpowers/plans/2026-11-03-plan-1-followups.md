@@ -177,3 +177,18 @@ SNS does with control characters, API Gateway header decoding), Step Functions
 semantics (`States.JsonMerge`, redrive), `scripts/approve.py` beyond its host
 pattern (it signs a request to whatever https host `--url` names), the other
 detectors, the reminder flow.
+
+## Cutover and controlled deletion test of 2026-11-12 (Plan 3, Tasks 10 and 11)
+
+Done; records in the runbook and in `docs/evidence/`. Open after them:
+
+- Destroy the old stack and its retained log group (Task 12).
+- The approval of run `20261111T203848Z-138c` still expires on 2026-11-14
+  20:09 UTC: verify the expiry path then. If it were approved by mistake
+  before that, the executor would find its only candidate gone.
+- The controlled test had no Elastic IP or Internet Monitor decoy; those two
+  deleters have run against stubs only.
+- The owner can add redacted screenshots of the approval and result emails to
+  `docs/evidence/`.
+- The Lambda concurrency quota request (Task 9) is still to be made; until
+  then deploys carry `-c reservedConcurrency=false`.

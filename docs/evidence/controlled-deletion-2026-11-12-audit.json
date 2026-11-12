@@ -1,0 +1,298 @@
+{
+  "items": [
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "kind": "cloudfront",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": ""
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "cloudfront",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "EXAMPLEDISTRIBUTION",
+      "sk": "RESOURCE#global#cloudfront#EXAMPLEDISTRIBUTION#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "kind": "cw-dashboard",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": ""
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "cw-dashboard",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "example-dashboard",
+      "sk": "RESOURCE#global#cw-dashboard#example-dashboard#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "kind": "cw-dashboard",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "name prefix LAB-"
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "cw-dashboard",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "LAB-decoy",
+      "sk": "RESOURCE#global#cw-dashboard#LAB-decoy#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "kind": "cw-dashboard",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "name prefix LAB-"
+      },
+      "dryRun": false,
+      "event": "PROPOSED",
+      "kind": "cw-dashboard",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "LAB-decoy",
+      "sk": "RESOURCE#global#cw-dashboard#LAB-decoy#PROPOSED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "kind": "s3-bucket",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": ""
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "s3-bucket",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "example-bucket-1",
+      "sk": "RESOURCE#global#s3-bucket#example-bucket-1#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "kind": "s3-bucket",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": ""
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "s3-bucket",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "example-bucket-2",
+      "sk": "RESOURCE#global#s3-bucket#example-bucket-2#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "estimatedMonthlyUsd": 0.05,
+        "kind": "ebs-snapshot",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tagged janitor=keep"
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "ebs-snapshot",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "snap-069661b86a0bdf3b6",
+      "sk": "RESOURCE#us-east-1#ebs-snapshot#snap-069661b86a0bdf3b6#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "estimatedMonthlyUsd": 0.05,
+        "kind": "ebs-snapshot",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tag Purpose=lab, 0 days old, not referenced by any AMI"
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "ebs-snapshot",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "snap-0c95095ead1c139ec",
+      "sk": "RESOURCE#us-east-1#ebs-snapshot#snap-0c95095ead1c139ec#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "estimatedMonthlyUsd": 0.05,
+        "kind": "ebs-snapshot",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tag Purpose=lab, 0 days old, not referenced by any AMI"
+      },
+      "dryRun": false,
+      "event": "PROPOSED",
+      "kind": "ebs-snapshot",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "snap-0c95095ead1c139ec",
+      "sk": "RESOURCE#us-east-1#ebs-snapshot#snap-0c95095ead1c139ec#PROPOSED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "estimatedMonthlyUsd": 0.08,
+        "kind": "ebs-volume",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tag Purpose=lab, available, 0 days old"
+      },
+      "dryRun": false,
+      "event": "DETECTED",
+      "kind": "ebs-volume",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "vol-0001e0237f1d10359",
+      "sk": "RESOURCE#us-east-1#ebs-volume#vol-0001e0237f1d10359#DETECTED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "estimatedMonthlyUsd": 0.08,
+        "kind": "ebs-volume",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tag Purpose=lab, available, 0 days old"
+      },
+      "dryRun": false,
+      "event": "PROPOSED",
+      "kind": "ebs-volume",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "vol-0001e0237f1d10359",
+      "sk": "RESOURCE#us-east-1#ebs-volume#vol-0001e0237f1d10359#PROPOSED"
+    },
+    {
+      "actor": "lambda:detector",
+      "at": "2026-11-12T19:56:59.979208+00:00",
+      "detail": {
+        "candidateCount": 3,
+        "dryRun": false,
+        "errorCount": 3,
+        "estimatedMonthlyUsd": 0.18,
+        "findingCount": 8,
+        "planKey": "plans/20261112T195659Z-bbb8/plan.json",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "planVersionId": "A.iSupPvxfRMm3l4Iso5SxagOyqC1Ejj",
+        "reportKey": "plans/20261112T195659Z-bbb8/report.txt",
+        "reportVersionId": "qjaiS26slNrjq.kkxCCmNWTMoYGj.w9a",
+        "runId": "20261112T195659Z-bbb8"
+      },
+      "event": "SUMMARY",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "sk": "RUN#SUMMARY"
+    },
+    {
+      "actor": "lambda:executor",
+      "at": "2026-11-12T20:00:09.888021+00:00",
+      "detail": {
+        "approvalId": "2e8fa9c9-fdf6-4d1b-9ff4-d4bcf523f244",
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "name prefix LAB-"
+      },
+      "dryRun": false,
+      "event": "DELETED",
+      "kind": "cw-dashboard",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "global",
+      "resourceId": "LAB-decoy",
+      "sk": "RESOURCE#global#cw-dashboard#LAB-decoy#DELETED"
+    },
+    {
+      "actor": "lambda:executor",
+      "at": "2026-11-12T20:00:10.224594+00:00",
+      "detail": {
+        "approvalId": "2e8fa9c9-fdf6-4d1b-9ff4-d4bcf523f244",
+        "estimatedMonthlyUsd": 0.05,
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tag Purpose=lab, 0 days old, not referenced by any AMI"
+      },
+      "dryRun": false,
+      "event": "DELETED",
+      "kind": "ebs-snapshot",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "snap-0c95095ead1c139ec",
+      "sk": "RESOURCE#us-east-1#ebs-snapshot#snap-0c95095ead1c139ec#DELETED"
+    },
+    {
+      "actor": "lambda:executor",
+      "at": "2026-11-12T20:00:10.946562+00:00",
+      "detail": {
+        "approvalId": "2e8fa9c9-fdf6-4d1b-9ff4-d4bcf523f244",
+        "estimatedMonthlyUsd": 0.08,
+        "planSha256": "363682034293411e3002780839e5a37877472d3d6b2fcdc2ba93b2be6e7b8aa3",
+        "reason": "tag Purpose=lab, available, 0 days old"
+      },
+      "dryRun": false,
+      "event": "DELETED",
+      "kind": "ebs-volume",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "region": "us-east-1",
+      "resourceId": "vol-0001e0237f1d10359",
+      "sk": "RESOURCE#us-east-1#ebs-volume#vol-0001e0237f1d10359#DELETED"
+    },
+    {
+      "actor": "statemachine",
+      "approvedBy": {
+        "at": "2026-11-12T20:00:08.378583+00:00",
+        "mode": "link"
+      },
+      "at": "2026-11-12T20:00:11.332Z",
+      "detail": {
+        "approvalId": "2e8fa9c9-fdf6-4d1b-9ff4-d4bcf523f244",
+        "deleted": 3,
+        "failed": 0,
+        "items": [
+          {
+            "kind": "cw-dashboard",
+            "outcome": "DELETED",
+            "reason": "name prefix LAB-",
+            "region": "global",
+            "resourceId": "LAB-decoy"
+          },
+          {
+            "kind": "ebs-snapshot",
+            "outcome": "DELETED",
+            "reason": "tag Purpose=lab, 0 days old, not referenced by any AMI",
+            "region": "us-east-1",
+            "resourceId": "snap-0c95095ead1c139ec"
+          },
+          {
+            "kind": "ebs-volume",
+            "outcome": "DELETED",
+            "reason": "tag Purpose=lab, available, 0 days old",
+            "region": "us-east-1",
+            "resourceId": "vol-0001e0237f1d10359"
+          }
+        ],
+        "runId": "20261112T195659Z-bbb8",
+        "skipped": 0
+      },
+      "event": "APPROVED",
+      "pk": "RUN#20261112T195659Z-bbb8",
+      "sk": "APPROVAL#2e8fa9c9-fdf6-4d1b-9ff4-d4bcf523f244"
+    }
+  ],
+  "note": "Audit table items under RUN#<runId> for the controlled deletion test of 2026-11-12. approvedBy is reduced to mode and at, JSON strings are expanded, the account id is replaced by 123456789012.",
+  "runId": "20261112T195659Z-bbb8"
+}
