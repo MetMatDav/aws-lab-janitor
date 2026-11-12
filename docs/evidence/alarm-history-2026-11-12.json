@@ -1,0 +1,247 @@
+{
+  "note": "State changes of two alarms of LabJanitorStack during the operational rehearsal of 2026-11-11 and 2026-11-12 (cloudwatch describe-alarm-history, StateUpdate items, account id replaced by 123456789012).",
+  "alarms": {
+    "LabJanitorStack-AlarmsExecutionFailed4289DC5C-EdO8XtyOGXBC": [
+      {
+        "timestamp": "2026-11-11T20:38:03.898000+00:00",
+        "summary": "Alarm updated from INSUFFICIENT_DATA to OK",
+        "data": {
+          "version": "1.0",
+          "oldState": {
+            "stateValue": "INSUFFICIENT_DATA",
+            "stateReason": "Unchecked: Initial alarm creation"
+          },
+          "newState": {
+            "stateValue": "OK",
+            "stateReason": "Threshold Crossed: no datapoints were received for 1 period and 1 missing datapoint was treated as [NonBreaching].",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:38:03.897+0000",
+              "period": 300,
+              "recentDatapoints": [],
+              "threshold": 1.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T20:33:00.000+0000"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-11-11T20:40:03.904000+00:00",
+        "summary": "Alarm updated from OK to ALARM",
+        "data": {
+          "version": "1.0",
+          "oldState": {
+            "stateValue": "OK",
+            "stateReason": "Threshold Crossed: no datapoints were received for 1 period and 1 missing datapoint was treated as [NonBreaching].",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:38:03.897+0000",
+              "period": 300,
+              "recentDatapoints": [],
+              "threshold": 1.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T20:33:00.000+0000"
+                }
+              ]
+            }
+          },
+          "newState": {
+            "stateValue": "ALARM",
+            "stateReason": "Threshold Crossed: 1 datapoint [1.0 (11/11/26 20:35:00)] was greater than or equal to the threshold (1.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:40:03.895+0000",
+              "startDate": "2026-11-11T20:35:00.000+0000",
+              "period": 300,
+              "recentDatapoints": [
+                1.0
+              ],
+              "threshold": 1.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T20:35:00.000+0000",
+                  "value": 1.0
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-11-11T20:55:03.905000+00:00",
+        "summary": "Alarm updated from ALARM to OK",
+        "data": {
+          "version": "1.0",
+          "oldState": {
+            "stateValue": "ALARM",
+            "stateReason": "Threshold Crossed: 1 datapoint [1.0 (11/11/26 20:35:00)] was greater than or equal to the threshold (1.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:40:03.895+0000",
+              "startDate": "2026-11-11T20:35:00.000+0000",
+              "period": 300,
+              "recentDatapoints": [
+                1.0
+              ],
+              "threshold": 1.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T20:35:00.000+0000",
+                  "value": 1.0
+                }
+              ]
+            }
+          },
+          "newState": {
+            "stateValue": "OK",
+            "stateReason": "Threshold Crossed: no datapoints were received for 1 period and 1 missing datapoint was treated as [NonBreaching].",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:55:03.902+0000",
+              "period": 300,
+              "recentDatapoints": [],
+              "threshold": 1.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T20:50:00.000+0000"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "LabJanitorStack-AlarmsReportsUndelivered9A791B96-VgAgpo3DQtkb": [
+      {
+        "timestamp": "2026-11-11T20:37:00.089000+00:00",
+        "summary": "Alarm updated from INSUFFICIENT_DATA to OK",
+        "data": {
+          "version": "1.0",
+          "oldState": {
+            "stateValue": "INSUFFICIENT_DATA",
+            "stateReason": "Unchecked: Initial alarm creation"
+          },
+          "newState": {
+            "stateValue": "OK",
+            "stateReason": "Threshold Crossed: 1 datapoint [0.0 (11/11/26 18:37:00)] was not greater than the threshold (0.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:37:00.086+0000",
+              "startDate": "2026-11-11T18:37:00.000+0000",
+              "period": 3600,
+              "recentDatapoints": [
+                0.0
+              ],
+              "threshold": 0.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T18:37:00.000+0000",
+                  "value": 0.0
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-11-12T17:42:00.087000+00:00",
+        "summary": "Alarm updated from OK to ALARM",
+        "data": {
+          "version": "1.0",
+          "oldState": {
+            "stateValue": "OK",
+            "stateReason": "Threshold Crossed: 1 datapoint [0.0 (11/11/26 18:37:00)] was not greater than the threshold (0.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-11T20:37:00.086+0000",
+              "startDate": "2026-11-11T18:37:00.000+0000",
+              "period": 3600,
+              "recentDatapoints": [
+                0.0
+              ],
+              "threshold": 0.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-11T18:37:00.000+0000",
+                  "value": 0.0
+                }
+              ]
+            }
+          },
+          "newState": {
+            "stateValue": "ALARM",
+            "stateReason": "Threshold Crossed: 1 datapoint [1.0 (12/11/26 16:42:00)] was greater than the threshold (0.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-12T17:42:00.085+0000",
+              "startDate": "2026-11-12T16:42:00.000+0000",
+              "period": 3600,
+              "recentDatapoints": [
+                1.0
+              ],
+              "threshold": 0.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-12T16:42:00.000+0000",
+                  "value": 1.0
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-11-12T17:43:00.090000+00:00",
+        "summary": "Alarm updated from ALARM to OK",
+        "data": {
+          "version": "1.0",
+          "oldState": {
+            "stateValue": "ALARM",
+            "stateReason": "Threshold Crossed: 1 datapoint [1.0 (12/11/26 16:42:00)] was greater than the threshold (0.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-12T17:42:00.085+0000",
+              "startDate": "2026-11-12T16:42:00.000+0000",
+              "period": 3600,
+              "recentDatapoints": [
+                1.0
+              ],
+              "threshold": 0.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-12T16:42:00.000+0000",
+                  "value": 1.0
+                }
+              ]
+            }
+          },
+          "newState": {
+            "stateValue": "OK",
+            "stateReason": "Threshold Crossed: 1 datapoint [0.0 (12/11/26 16:43:00)] was not greater than the threshold (0.0).",
+            "stateReasonData": {
+              "version": "1.0",
+              "queryDate": "2026-11-12T17:43:00.088+0000",
+              "startDate": "2026-11-12T16:43:00.000+0000",
+              "period": 3600,
+              "recentDatapoints": [
+                0.0
+              ],
+              "threshold": 0.0,
+              "evaluatedDatapoints": [
+                {
+                  "timestamp": "2026-11-12T16:43:00.000+0000",
+                  "value": 0.0
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

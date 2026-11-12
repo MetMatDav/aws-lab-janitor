@@ -79,9 +79,8 @@ flags, on the undelivered alarm recovering by itself and on what the data
 events contain. Deferred:
 
 - Undelivered alarms: blind in the hour a subscription is created (the
-  confirmation email is a delivery). A five-minute period would shrink the
-  window and raise the odds of a boundary false alarm; decide after Task 8
-  shows whether the alarm flaps on a normal run.
+  confirmation email is a delivery). Task 8 showed the alarm also flaps on a
+  normal run; see the rehearsal section below.
 - Approval handler: if botocore retries the claim `UpdateItem` after a lost
   response, the retry fails against the handler's own `DECIDING` and the
   approver gets `409` with no callback sent; the run waits until it expires.
@@ -103,3 +102,30 @@ events contain. Deferred:
 - Plan 4 threat model: approval ids appear in clear in the CloudTrail data
   events (item keys) and in the reminder execution's input; the committed plan
   files name a local path and an SSO profile.
+
+## Operational rehearsal of 2026-11-11 and 2026-11-12 (Plan 3, Task 8)
+
+Record in the runbook. Open after it:
+
+- Defect, to fix before the cutover: `ReportsUndelivered` raised a false alarm
+  on a delivered message (`ALARM` 17:42:00 UTC, `OK` 17:43:00). The rejection
+  email was published at 17:41:28; the alarm, evaluated every minute over a
+  sliding hour, saw `published` 2 and `delivered` 1 for one evaluation. Whether
+  it flaps depends on where in the minute the publish lands, so the run of
+  2026-11-11 did not show it. No alarm setting asks for a breach to last: one
+  message is one datapoint. Options: check the subscriptions of the topic in
+  the notifier before publishing and fail the run when none is confirmed (no
+  alarm, no lag, fails fast instead of waiting 72 hours for nobody); or a
+  composite alarm whose actions are suppressed while a publish is recent (two
+  more alarms, still blind in the subscription hour); or drop the two alarms
+  and rely on the post-deploy subscription check.
+- The approval of run `20261111T203848Z-138c` is `PENDING` and its execution
+  waits in `RequestApproval`. It expires on 2026-11-14 20:09 UTC; check then
+  for `RecordExpired`, `MirrorExpired`, `NotifyExpired`, `Expired`, the
+  `EXPIRED` record and the expiry email, and add the result to the runbook.
+  Its decoy is gone, so nothing depends on it.
+- The second submission of the form was a page reload (`GET 409`), not a
+  `POST`. The `POST 409` was seen on 2026-11-11.
+- `ExecutionFailed` stayed in `ALARM` for 15 minutes on a 5 minute period. Not
+  a problem; the runbook should not promise a faster recovery.
+- Still unit tests only: the IAM approval route.

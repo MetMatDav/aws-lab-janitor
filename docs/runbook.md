@@ -99,7 +99,10 @@ plan and report and its `PutItem` calls, the notifier's and the executor's
 machine's mirror item. Reads are logged as well as writes. The `who` column is
 the role session name, which for a Lambda function is the function name.
 
-DynamoDB data events record the key of the item, not its other attributes. The
+DynamoDB data events record the key of the item, the names of the attributes
+written and the condition and update expressions, never an attribute value. A
+conditional write that lost is recorded too, with `errorCode`
+`ConditionalCheckFailedException`. The
 calls on the approval record (`pk` `APPROVAL#<approvalId>`) therefore do not
 match a run id; search for the approval id to see who created, claimed and
 closed an approval. It also means the trail's log bucket holds approval ids in
@@ -503,6 +506,53 @@ Not exercised in this rehearsal: a wrong confirmation code on a `PENDING`
 approval, the reject path, the expiry path and the IAM route. They are covered
 by unit tests only; see the follow-ups file.
 
+### Operational rehearsal record: 2026-11-11 and 2026-11-12
+
+Plan 3 template, deployed on 2026-11-11 with `createTrail=dataEventsOnly` and
+deletions disabled. Decoy `LAB-decoy-plan3`, deleted by hand afterwards.
+
+- After the deploy: six alarms, five of them `OK` within three minutes; the
+  heartbeat left `INSUFFICIENT_DATA` 42 minutes later. The trail was logging
+  with the two data selectors and no management selector.
+- Reminder (run `20261111T203848Z-138c`): `StartReminder` started a reminder
+  execution with `waitSeconds` 216000. A reminder started by hand with
+  `waitSeconds` 5 sent the email and stamped `remindedAt`; a second one returned
+  `{"reminded": false}` and sent nothing. The 60 hour execution was stopped by
+  hand. That approval was never opened and is left to expire on 2026-11-14 to
+  see the expiry path.
+- Failure path: an execution with input `[]` failed in `Defaults` with
+  `States.ReferencePathConflict` and never reached `NotifyFailure`.
+  `ExecutionFailed` went to `ALARM` 17 seconds after the start and back to `OK`
+  15 minutes later; both emails arrived. History in
+  `docs/evidence/alarm-history-2026-11-12.json`.
+- Wrong code, then reject (run `20261112T173931Z-169b`, approval
+  `e03cffb7-a9da-45ce-9685-7f96da7ba810`, email link). Access log: `GET 200`,
+  `POST 400` (handler log `confirmation code mismatch, decision refused`, record
+  still `PENDING`), `GET 200`, `POST 200`, and `GET 409` when the page was
+  reloaded after the decision.
+- State path after the decision: `RecordRejected`, `MirrorRejected`,
+  `NotifyRejected`, `Rejected`; `SUCCEEDED` one second after the decision. The
+  record is `REJECTED`, the mirror event under the run is `REJECTED`, and the
+  executor had zero invocations on both days. The reports topic delivered the
+  weekly report and the rejection email, the approvals topic delivered the
+  request, with no failed notifications.
+- The handler and the state machine race to close the record, as designed. The
+  handler won: `RecordRejected` got `ConditionalCheckFailedException`, the catch
+  moved on, and the handler logged no error.
+- Data events reached the trail bucket about five minutes after the calls. For
+  the rejected run they show, in order: the detector's two `PutObject` under
+  `plans/<runId>/` and its seven `PutItem`, the notifier's two `GetObject` and
+  its `PutItem` of the approval record, the handler's `GetItem` per request and
+  its two `UpdateItem` (claim, then close), the state machine's failed
+  `UpdateItem` and its `PutItem` of the mirror. The operator's own reads of the
+  table during the rehearsal are there as well.
+- Defect: `ReportsUndelivered` fired at 17:42:00 UTC and recovered at 17:43:00,
+  with both emails delivered. See [Alarms](#alarms) and the follow-ups file.
+  `ApprovalsUndelivered` did not change state.
+
+Not exercised: the expiry path (pending, see above), the IAM route, and a
+`POST` on a decided approval (seen on 2026-11-11).
+
 ## Pause and resume
 
 To pause the weekly run, redeploy with the schedule disabled:
@@ -573,9 +623,12 @@ Things to know:
   its actions are disabled, so a deliberate pause sends nothing.
 - The heartbeat can raise a false alarm for up to an hour if a Monday run starts
   later than the one of the week before. The recovery notification follows.
-- The undelivered alarms look at one-hour periods. A publish in the last second
-  of an hour whose delivery lands in the next one can raise a false alarm that
-  clears an hour later.
+- Known defect, seen on 2026-11-12: an undelivered alarm can fire for one minute
+  on a healthy delivery. It is evaluated every minute over the last 60 minutes,
+  and CloudWatch can receive the publish datapoint of a message before its
+  delivery datapoint. The signature is an `ALARM` email followed by `OK` one
+  minute later; a message that really reached nobody keeps the alarm in `ALARM`
+  for about an hour. The follow-ups file tracks the redesign.
 - An undelivered alarm goes back to `OK` by itself about an hour after it
   fired, when the publish leaves the one-hour window. That recovery email does
   not mean the subscription was fixed: check it.
