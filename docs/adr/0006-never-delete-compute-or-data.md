@@ -36,3 +36,5 @@ action for anything else, so no input, plan or approval can cause one.
 - [tests/infra/test_iam_guardrails.py](../../tests/infra/test_iam_guardrails.py):
   `test_executor_mutating_allows_are_locked_to_lab_resources` and
   `test_delete_allows_belong_to_the_executor_or_are_log_delivery`.
+- [tests/docs/test_readme.py](../../tests/docs/test_readme.py):
+  `test_never_touches_is_every_kind_that_cannot_be_deleted`.
