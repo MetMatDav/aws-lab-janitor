@@ -2,15 +2,15 @@
 
 The janitor deletes resources, so the tests are organized around one question:
 what would have to go wrong for it to delete the wrong thing, and what in the
-suite would notice. Counts are from 2026-11-12.
+suite would notice. Counts are from 2026-11-18.
 
 ## The layers
 
 | Suite | Tests | What it asks | How |
 | ----- | ----- | ------------ | --- |
 | `tests/unit` | 492 | Does each function do what was meant | The real code against recorded AWS responses (botocore `Stubber`), which also fixes the order of the calls |
-| `tests/infra` | 308 | Is the infrastructure what the design says | Assertions on the synthesized template, a snapshot of it, and guardrails that scan every IAM statement of the stack |
-| `tests/adversarial` | 537 | What can someone else make it do | Attacks from three footholds: seeing an approval URL, being able to tag resources, being able to start executions or write the plans bucket |
+| `tests/infra` | 309 | Is the infrastructure what the design says | Assertions on the synthesized template, a snapshot of it, and guardrails that scan every IAM statement of the stack |
+| `tests/adversarial` | 538 | What can someone else make it do | Attacks from three footholds: seeing an approval URL, being able to tag resources, being able to start executions or write the plans bucket |
 | `tests/property` | 17 | Does this hold for every input | Generated inputs and an invariant (`hypothesis`), including a state machine over the approval record |
 | `tests/docs` | about 80 | Do the documents still describe the code | Links and anchors resolve, the README's tables and diagram match the code, no personal data in the tree |
 
@@ -44,8 +44,8 @@ which is what CI uses so that a failure can be reproduced.
 
 ## Tests that fail on purpose
 
-Three tests are marked `xfail(strict=True)`: they assert the behaviour the code
-should have and does not, for the three
+Four tests are marked `xfail(strict=True)`: they assert the behaviour the code
+should have and does not, for the four
 [known limitations](known-limitations.md). They keep the suite green today and
 turn it red the day one of them is fixed without removing the mark.
 `pytest tests/adversarial --runxfail` shows them failing.
@@ -79,6 +79,7 @@ live, in the owner's account:
 | 2026-11-12 | A real deletion: three decoys approved and deleted, a keep-tagged one left alone | [evidence/controlled-deletion-2026-11-12.md](evidence/controlled-deletion-2026-11-12.md) |
 | 2026-11-14 | An approval nobody answered expiring after 72 hours | [evidence/expiry-2026-11-14.md](evidence/expiry-2026-11-14.md) |
 | 2026-11-16 | The first scheduled run with deletions armed: started by the schedule, nothing to delete, report delivered | [runbook](runbook.md#cutover-record-2026-11-12) |
+| 2026-11-18 | A security audit of the source in a sandbox, with no access to the account: nothing confirmed, two leads | [evidence/security-audit-2026-11-18.md](evidence/security-audit-2026-11-18.md) |
 
 ## What never ran live
 

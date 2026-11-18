@@ -234,6 +234,9 @@ One NAT gateway left running costs $32.85 a month.
   it caused.
 - [An approval nobody answered](docs/evidence/expiry-2026-11-14.md): it
   expired after 72 hours and nothing was deleted.
+- [A security audit](docs/evidence/security-audit-2026-11-18.md) before
+  publication: nothing confirmed, two leads, one fixed and one written up as a
+  limitation.
 - The first scheduled run with deletions armed, on Monday 2026-11-16: it
   started by itself, found nothing to delete and emailed its report.
 - Rehearsals of approval, rejection, a wrong code, the reminder and a failed
@@ -260,10 +263,12 @@ including what never ran against a real account.
 
 - **It is for one account and one owner.** No Organizations support, no
   multi-account view.
-- **Three known limitations**, each with a test that fails on purpose and the
+- **Four known limitations**, each with a test that fails on purpose and the
   change it would take: the approval id can be read by anyone who can read the
-  audit trail of the account, and the detector and the executor run out of time
-  with thousands of resources. [docs/known-limitations.md](docs/known-limitations.md).
+  audit trail of the account, someone who can invoke the approval function
+  directly can pass as the IAM approver, and the detector and the executor run
+  out of time with thousands of resources.
+  [docs/known-limitations.md](docs/known-limitations.md).
 - **Not everything has run live.** The approval route authenticated with IAM
   and the deletion of addresses and monitors are covered by tests against
   recorded responses only. The IAM half of the double lock was simulated

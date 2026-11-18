@@ -50,8 +50,8 @@ class LabJanitorStack(Stack):
             enforce_ssl=True,
         )
         dlq_reason = (
-            "This queue is the dead-letter queue of the scheduler and of the email subscriptions; "
-            "a dead-letter queue of its own adds nothing"
+            "This queue is the dead-letter queue of the scheduler and of the report and alert "
+            "emails; a dead-letter queue of its own adds nothing"
         )
         acknowledge(
             self.dlq,

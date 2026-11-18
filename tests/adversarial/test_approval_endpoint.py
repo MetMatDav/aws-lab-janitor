@@ -21,6 +21,7 @@ from tests.adversarial.approval_helpers import (
     LINK_APPROVER,
     LINK_ROUTE,
     ROLE_ARN,
+    approval_record,
     call,
     claim_params,
     failure_params,
@@ -612,3 +613,46 @@ def test_forwarding_headers_cannot_spoof_the_source_ip_in_the_audit_record(api):
     assert response["statusCode"] == 200
     ((_name, callback),) = api.callbacks
     assert json.loads(callback["output"])["approvedBy"] == LINK_APPROVER
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="the IAM route takes the caller from requestContext.authorizer, which API Gateway "
+    "fills in but anyone invoking the function directly can write: lambda:InvokeFunction on "
+    "the approval function is enough to pass as the approver. Accepted: "
+    "docs/known-limitations.md 4",
+)
+def test_a_direct_invoke_cannot_pass_as_the_approver(monkeypatch):
+    """Foothold: ``lambda:InvokeFunction`` on the approval function and a pending approval
+    id (readable inside the account, limitation 1), without the approver role.
+
+    The event below has only what such a caller has to write: no API id, no stage, no
+    request id, nothing API Gateway signed. It is still accepted, because nothing in an
+    event proves where it came from. A handler that verified the caller itself (a
+    presigned ``sts:GetCallerIdentity`` request sent with the decision) would refuse it.
+    """
+    monkeypatch.setenv("APPROVAL_AUTH", "iam")
+    monkeypatch.setenv("APPROVER_ROLE_ARN", ROLE_ARN)
+    decided = []
+
+    class Store:
+        def get(self, _approval_id):
+            return approval_record()
+
+    def record_decision(_store, _states, _found, decision, _log):
+        decided.append(decision.approver)
+        return 200
+
+    monkeypatch.setattr(approval, "build_dependencies", lambda: (Store(), object()))
+    monkeypatch.setattr(approval, "decide", record_decision)
+    forged = {
+        "routeKey": f"POST {IAM_ROUTE}",
+        "pathParameters": {"id": APPROVAL_ID},
+        "requestContext": {"authorizer": {"iam": {"userArn": CALLER_ARN}}},
+        "body": IAM_BODY,
+    }
+
+    response = call(forged)
+
+    assert response["statusCode"] == 403
+    assert decided == []

@@ -23,7 +23,8 @@ class Alarms(Construct):
     """The janitor's alarms.
 
     - ``DlqNotEmpty``: the scheduler could not start a run, or SNS could not
-      deliver an email.
+      deliver a report or an alert email. Approval emails are never sent to
+      the queue (ADR-0015).
     - ``ExecutionFailed``: a weekly execution failed or timed out. A backstop
       for failures that never reach the ``NotifyFailure`` state.
     - ``ReminderFailed``: an approval reminder execution failed.

@@ -5,9 +5,10 @@ owner, one lab account, tens of resources), and what the change would be if
 the context grew. Each limitation has a test that fails today on purpose
 (`xfail(strict=True)`), so the day one is fixed its test says so.
 
-They were found by an adversarial pass over the code on 2026-11-12. The
-defects that pass also found, and that were fixed, are in
-`docs/superpowers/plans/2026-11-03-plan-1-followups.md`.
+The first three were found by an adversarial pass over the code on 2026-11-12.
+The defects that pass also found, and that were fixed, are in
+`docs/superpowers/plans/2026-11-03-plan-1-followups.md`. The fourth was found
+by a [security audit](evidence/security-audit-2026-11-18.md) on 2026-11-18.
 
 ## 1. The approval id is readable by anyone who can read the audit trail
 
@@ -35,7 +36,8 @@ execution history.
 **The mitigation that exists today.** Deploy with `-c approvalAuth=iam -c
 approverRoleArn=<role>`. On the IAM route the id decides nothing: API Gateway
 authenticates the caller with SigV4 and the handler compares the caller with
-the approver role.
+the approver role. That holds for a caller who comes through the API; section 4
+is what remains.
 
 **What the fix would be.** The secret has to be born where it is used and never
 travel through the orchestrator:
@@ -110,6 +112,50 @@ approval email shows the count before anyone approves.
    hour ago.
 
 Test: `tests/adversarial/test_exhaustion.py::test_recording_the_leftovers_fits_in_the_reserve_the_executor_kept`.
+
+## 4. A direct invoke of the approval function can pass as the approver
+
+**What happens.** With `approvalAuth=iam` or `both`, the IAM route reads the
+caller from `requestContext.authorizer.iam.userArn` in the event. API Gateway
+fills that field in after it authenticates the caller with SigV4. A Lambda
+function can also be invoked directly, and whoever does that writes the whole
+event, that field included. The handler cannot tell the two apart: nothing in
+an event proves where it came from.
+
+**Who can use it.** Someone who holds `lambda:InvokeFunction` on the approval
+function, cannot assume the approver role, and knows the id of a pending
+approval (limitation 1). They could approve a plan in the approver's name. As
+in limitation 1, they could not change what the plan deletes. With
+`approvalAuth=link`, the default, the IAM route answers `404` and this does not
+apply.
+
+**Why it stands.** In this account the only principal that can invoke the
+function is the owner, who is also the approver. The reader limitation 1 is
+about, with read-only access, cannot invoke a function. Closing it in code
+means a second authentication protocol on a route that has never run live.
+
+**The mitigation that exists today.** Keep `lambda:InvokeFunction` on the
+approval function away from every principal but the approver. The runbook says
+how to check it and how to deny it:
+[Who may invoke the approval function](runbook.md#who-may-invoke-the-approval-function).
+API Gateway is not affected: it invokes through the function's resource policy,
+as a service.
+
+**What the fix would be.** The handler authenticates the caller itself instead
+of trusting the event:
+
+1. `scripts/approve.py` sends, with the decision, a presigned
+   `sts:GetCallerIdentity` request whose signature covers a header that names
+   the approval id and the decision.
+2. The handler accepts that request only if it is addressed to the STS endpoint
+   of its own region, sends it, and takes the caller from the answer of STS.
+   A hand-written event has no such signature to offer.
+3. The proof expires in seconds and is bound to one approval and one decision,
+   so replaying it repeats a decision that was already made.
+
+The IAM authorizer of the route stays as the first filter.
+
+Test: `tests/adversarial/test_approval_endpoint.py::test_a_direct_invoke_cannot_pass_as_the_approver`.
 
 ## Deliberate choices that can surprise
 

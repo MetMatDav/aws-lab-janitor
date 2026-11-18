@@ -7,19 +7,29 @@ from aws_cdk import aws_sqs as sqs
 from constructs import Construct
 
 from lab_janitor.config import JanitorConfig
+from lab_janitor.nag import acknowledge
+
+NO_APPROVAL_REDRIVE_REASON = (
+    "An approval email carries a link that decides a plan; a dead-letter queue would keep it "
+    "where the topic's subscriber lock does not reach (ADR-0015)"
+)
 
 
 class Notifications(Construct):
     """Report, approval and alert topics with email subscriptions.
 
-    Every topic denies non-TLS publishes. Each email subscription redrives
-    undeliverable messages to the shared dead-letter queue so a delivery
-    failure is never silent.
+    Every topic denies non-TLS publishes. The report and alert subscriptions
+    redrive undeliverable messages to the shared dead-letter queue so a
+    delivery failure is never silent.
 
     The approvals topic carries links that approve a deletion, so it is
     locked down further: only CloudFormation and the account root may change
-    who receives it, and only the notifier (see ``restrict_publishers``) may
-    publish to it.
+    who receives it, only the notifier (see ``restrict_publishers``) may
+    publish to it, and its subscription has no dead-letter queue. A queue
+    would keep the link for 14 days where the readers are whoever holds
+    ``sqs:ReceiveMessage``. An approval email that SNS cannot deliver is
+    dropped: the request then expires with nothing deleted, and the reminder
+    and the expiry notice are further chances to notice (ADR-0015).
     """
 
     def __init__(
@@ -70,13 +80,16 @@ class Notifications(Construct):
             endpoint=config.report_email,
             dead_letter_queue=dlq,
         )
-        sns.Subscription(
+        approvals_email = sns.Subscription(
             self,
             "ApprovalsEmail",
             topic=self.approvals_topic,
             protocol=sns.SubscriptionProtocol.EMAIL,
             endpoint=config.approval_email,
-            dead_letter_queue=dlq,
+            # No dead_letter_queue on purpose: see the class docstring.
+        )
+        acknowledge(
+            approvals_email, {"Serverless::Serverless-SNSRedrivePolicy": NO_APPROVAL_REDRIVE_REASON}
         )
         sns.Subscription(
             self,

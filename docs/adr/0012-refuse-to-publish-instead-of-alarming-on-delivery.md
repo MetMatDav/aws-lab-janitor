@@ -31,7 +31,9 @@ so a request nobody would receive is never stored. Both alarms were removed.
 - A run that cannot reach its reader fails at once instead of waiting 72 hours
   for an approval nobody was asked for.
 - It checks the subscription, not the delivery. An address that is confirmed
-  but bounces is still the dead-letter queue's job.
+  but bounces is still the dead-letter queue's job, for reports and alerts.
+  Approval emails are not sent to the queue
+  ([ADR 0015](0015-approval-emails-are-not-redriven-to-a-queue.md)).
 - The alerts topic has no such guard: its failure would have nowhere to go.
 - The refusal itself has only been exercised in tests. Doing it live means
   unsubscribing the owner's own mailbox.

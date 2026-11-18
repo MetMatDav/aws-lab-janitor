@@ -110,6 +110,13 @@ the plan it was pointed at, and checks that plan's hash against the approval.
   ([ADR 0013](adr/0013-an-approval-is-good-for-one-hour.md)).
 - **The stronger option exists.** With `approvalAuth=iam` the id decides
   nothing: the caller is authenticated with SigV4 and compared with one role.
+  That is true of a caller who comes through the API. Someone who can invoke
+  the function directly writes the event, and with it the caller:
+  [known limitations](known-limitations.md), section 4.
+- **A failed approval email is dropped, not stored.** The other two
+  subscriptions send what SNS cannot deliver to the dead-letter queue. This one
+  does not, because the queue would hold a working link for whoever can read it
+  ([ADR 0015](adr/0015-approval-emails-are-not-redriven-to-a-queue.md)).
   That route is covered by tests and has not been used against the live API.
 
 ## The record
@@ -161,10 +168,19 @@ is in the follow-ups file under `docs/superpowers/plans/`, and
 [ADR 0014](adr/0014-three-kinds-of-tests.md) says how the suite keeps it from
 coming back.
 
+A [security audit](evidence/security-audit-2026-11-18.md) on 2026-11-18 read
+the source and ran it in a sandbox, without access to the account. It
+confirmed nothing and left two leads about a second principal inside the
+account. One was fixed (ADR 0015) and the other is limitation 4.
+
 ## What remains
 
 - The approval id is readable inside the account
   ([known limitations](known-limitations.md), section 1).
+- A direct invoke of the approval function can pass as the IAM approver
+  (section 4). It needs `lambda:InvokeFunction` on that function.
+- The audit was a partial pass. It did not review how the notifier trusts its
+  event, which is the same family as section 4.
 - With thousands of resources the detector and the executor run out of time
   writing their records (sections 2 and 3). They fail safe.
 - The keep tag must match exactly; a mistyped one protects nothing.

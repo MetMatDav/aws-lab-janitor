@@ -21,3 +21,4 @@ as it is now. The rest were taken for the release that added approval.
 | 0012 | [Refuse to publish to nobody, instead of alarming on delivery](0012-refuse-to-publish-instead-of-alarming-on-delivery.md) |
 | 0013 | [An approval is good for one hour](0013-an-approval-is-good-for-one-hour.md) |
 | 0014 | [Three kinds of tests: examples, adversaries and properties](0014-three-kinds-of-tests.md) |
+| 0015 | [Approval emails are not redriven to a queue](0015-approval-emails-are-not-redriven-to-a-queue.md) |

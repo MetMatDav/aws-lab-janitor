@@ -257,3 +257,39 @@ Done; records in the runbook and in `docs/evidence/`. Open after them:
   `docs/evidence/`.
 - The Lambda concurrency quota request (Task 9) is still to be made; until
   then deploys carry `-c reservedConcurrency=false`.
+
+## Security audit of 2026-11-18
+
+Record in `docs/evidence/security-audit-2026-11-18.md`. Done after it:
+
+- The approvals subscription no longer redrives to the dead-letter queue
+  (ADR 0015).
+- The direct invoke of the approval function is known limitation 4, with its
+  strict `xfail` test and the guardrail in the runbook.
+
+Open after it, none of them a vulnerability:
+
+- A `standard` run of the audit. First unit: the notifier trusts its event
+  (`approvalId` and `taskToken` in approval mode, `refresh_token` on a pending
+  record), the same family as limitation 4.
+- `scripts/approve.py` follows redirects and keeps the signed headers and the
+  session token on the redirected request. The signature is bound to the first
+  host, so nothing is gained; refuse any 3xx.
+- `src/approval/decision.py`: a lost answer to the callback, retried by boto3,
+  can come back as `TaskTimedOut` and mark the record `EXPIRED` while the run
+  resumed. It fails safe (the executor wants `APPROVED`). Use one attempt for
+  the callback client so a lost answer takes the `504` path.
+- The executor puts the approval id in its EventBridge events. It is decided by
+  then; a short hash would do.
+- CI: no top-level `permissions` block, and actions pinned by tag, not by
+  commit.
+- The Deny on `janitor=keep` relies on `aws:ResourceTag/janitor` for dashboards
+  and monitors; confirm in the Service Authorization Reference that both
+  services send it.
+- An invalid `minAgeDays` in an execution input falls back silently to the
+  deploy-time value.
+- `scheduleTimezone` is not validated at synth like the other settings.
+- `.gitignore` does not list `.env`, `*.pem` or `*.key`. None is tracked.
+- The controlled deletion evidence publishes a decided approval id and the ids
+  of the deleted decoys. Neither is usable; decide before making the
+  repository public whether to keep them.

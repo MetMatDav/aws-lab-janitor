@@ -1,3 +1,5 @@
+import json
+
 import aws_cdk as cdk
 import pytest
 from aws_cdk import assertions
@@ -44,8 +46,15 @@ def test_three_topics_and_three_subscriptions(template: assertions.Template):
         Match.object_like({"Properties": {"Protocol": "email"}}),
     )
     assert len(subscriptions) == 3
-    for subscription in subscriptions.values():
-        assert subscription["Properties"]["RedrivePolicy"] == {
+    approvals_id = _topic_id(template, "Lab Janitor Approvals")
+    redriven = [
+        sub["Properties"]
+        for sub in subscriptions.values()
+        if sub["Properties"]["TopicArn"]["Ref"] != approvals_id
+    ]
+    assert len(redriven) == 2
+    for properties in redriven:
+        assert properties["RedrivePolicy"] == {
             "deadLetterTargetArn": {"Fn::GetAtt": [dlq_id, "Arn"]}
         }
 
@@ -53,8 +62,37 @@ def test_three_topics_and_three_subscriptions(template: assertions.Template):
         sub["Properties"]["TopicArn"]["Ref"]: sub["Properties"]["Endpoint"]
         for sub in subscriptions.values()
     }
-    assert endpoints[_topic_id(template, "Lab Janitor Approvals")] == "approver@example.com"
+    assert endpoints[approvals_id] == "approver@example.com"
     assert endpoints[_topic_id(template, "Lab Janitor Reports")] == "test@example.com"
+
+
+def test_approval_emails_are_never_parked_in_a_queue(template: assertions.Template):
+    """An approval email carries a link that decides a plan.
+
+    The approvals topic is closed to new subscribers for that reason. A
+    redrive policy would hand the same message body to a queue whose readers
+    nothing here restricts, so an approval email that SNS cannot deliver is
+    dropped instead (ADR-0015).
+    """
+    approvals_id = _topic_id(template, "Lab Janitor Approvals")
+    subscriptions = template.find_resources(
+        "AWS::SNS::Subscription",
+        {"Properties": {"TopicArn": {"Ref": approvals_id}}},
+    )
+    assert len(subscriptions) == 1
+    (subscription,) = subscriptions.values()
+    assert "RedrivePolicy" not in subscription["Properties"]
+
+    # And the queue no longer accepts messages from that topic at all.
+    queue_policies = template.find_resources("AWS::SQS::QueuePolicy")
+    senders = {
+        json.dumps(statement.get("Condition", {}))
+        for policy in queue_policies.values()
+        for statement in policy["Properties"]["PolicyDocument"]["Statement"]
+        if statement["Effect"] == "Allow"
+    }
+    assert senders
+    assert not any(approvals_id in sender for sender in senders)
 
 
 def test_dlq_is_encrypted_and_ssl_only(template: assertions.Template):

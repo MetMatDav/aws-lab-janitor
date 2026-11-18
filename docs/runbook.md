@@ -458,6 +458,29 @@ environment's; the request is signed for the region in the API URL unless
 (`{"status": "APPROVED"}` or `{"status": "REJECTED"}`), exits 0 on a 2xx
 answer and 1 otherwise, and refuses a URL that is not `https://`.
 
+### Who may invoke the approval function
+
+The IAM route trusts what API Gateway says about the caller. A principal that
+holds `lambda:InvokeFunction` on the approval function can write that part of
+the event itself and pass as the approver
+([known limitation 4](known-limitations.md#4-a-direct-invoke-of-the-approval-function-can-pass-as-the-approver)).
+Before relying on `approvalAuth=iam`, check every principal that is not the
+approver. The function's ARN is in the Lambda console; its name starts with
+`LabJanitorStack-ApprovalApi`.
+
+```
+aws iam simulate-principal-policy --policy-source-arn <principal-arn> \
+  --action-names lambda:InvokeFunction --resource-arns <approval-function-arn>
+```
+
+The answer should be `implicitDeny` or `explicitDeny`. To enforce it, add an
+explicit `Deny` of `lambda:InvokeFunction` on that ARN to a permissions
+boundary or to the identity policies of those principals. In a member account
+of an organization a service control policy does the same for all of them at
+once; service control policies do not apply to the management account. API
+Gateway keeps working either way: it invokes the function through its resource
+policy, as a service.
+
 ## Dress rehearsal with deletions disabled
 
 Use this to test the whole approval path without risking anything: with the
@@ -648,7 +671,7 @@ itself.
 
 | Alarm | It means | What to do |
 | ----- | -------- | ---------- |
-| `DlqNotEmpty` | The scheduler could not start a run after its retries, or SNS could not deliver an email. The message is in the dead-letter queue. | Read the message (below) to see which. For a failed start, check the state machine and the schedule, then start a run by hand. For a failed email, check the address. Purge the queue when done; the alarm clears. |
+| `DlqNotEmpty` | The scheduler could not start a run after its retries, or SNS could not deliver a report or an alert email. The message is in the dead-letter queue. Approval emails are never sent there ([ADR 0015](adr/0015-approval-emails-are-not-redriven-to-a-queue.md)). | Read the message (below) to see which. For a failed start, check the state machine and the schedule, then start a run by hand. For a failed email, check the address. Purge the queue when done; the alarm clears. |
 | `ExecutionFailed` | A weekly execution failed or timed out. Most failures also send a `[Lab Janitor] Run failed` email from the `NotifyFailure` state, so expect two emails; a failure before or inside that state sends only this one. | Open the execution in Step Functions and read the failed state. Nothing is deleted by a failed run unless the result email says so. Start a new run once fixed. |
 | `ReminderFailed` | An execution of the reminder state machine failed. The approval itself is unaffected. | Decide the pending approval from the original email. Read the failed execution for the cause. |
 | `Heartbeat` | No execution started in the last 7 days: the schedule is disabled or broken, or the stack is. | Check the schedule state and the last execution. Start a manual dry-run; the alarm recovers within one to two hours (alarms over daily periods are evaluated hourly). |
@@ -752,6 +775,16 @@ A confirmed subscription existed when the notifier published, and it logged
 `NumberOfNotificationsDelivered` and `NumberOfNotificationsFailed` of the topic
 for that minute: a failed delivery is redriven to the dead-letter queue and
 raises `DlqNotEmpty`.
+
+### No approval email arrived
+
+The report said a plan was waiting and no approval request came. Look in spam
+first. A reminder goes out sixty hours after the request, and an approval
+nobody answers expires after 72 hours with nothing deleted. SNS does
+not keep an approval email it could not deliver
+([ADR 0015](adr/0015-approval-emails-are-not-redriven-to-a-queue.md)): look at
+`NumberOfNotificationsFailed` of the approvals topic for that minute, check the
+address of the subscription, and start a new run.
 
 ### Apply failed with `approval was decided too long ago`
 

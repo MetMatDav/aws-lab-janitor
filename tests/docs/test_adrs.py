@@ -10,8 +10,8 @@ SECTIONS = ["Status", "Context", "Decision", "Consequences", "Where to look"]
 TEST_FILES = [path for path in Path("tests").rglob("test_*.py")]
 
 
-def test_there_are_fourteen_numbered_without_gaps():
-    assert [path.name[:4] for path in ADRS] == [f"{n:04d}" for n in range(1, 15)]
+def test_there_are_fifteen_numbered_without_gaps():
+    assert [path.name[:4] for path in ADRS] == [f"{n:04d}" for n in range(1, 16)]
 
 
 @pytest.mark.parametrize("adr", ADRS, ids=lambda path: path.name[:4])

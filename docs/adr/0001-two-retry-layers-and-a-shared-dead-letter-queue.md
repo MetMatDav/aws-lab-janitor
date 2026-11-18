@@ -3,7 +3,9 @@
 ## Status
 
 Accepted on 2026-07-26 for the first janitor (one Lambda started by a schedule),
-carried over to the state machine on 2026-11-02.
+carried over to the state machine on 2026-11-02. Amended on 2026-11-18 by
+[ADR 0015](0015-approval-emails-are-not-redriven-to-a-queue.md): the approvals
+subscription no longer redrives to the queue.
 
 ## Context
 
