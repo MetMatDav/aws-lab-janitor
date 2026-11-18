@@ -4,6 +4,7 @@ Run ``python -m tests.docs.hygiene --history`` to scan every version of every
 file the repository has ever held.
 """
 
+import functools
 import hashlib
 import ipaddress
 import re
@@ -76,8 +77,15 @@ def _emails(text: str) -> list[str]:
     return [
         match.group()
         for match in _EMAIL.finditer(text)
-        if not match.group(1).lower().endswith(ALLOWED_EMAIL_DOMAINS)
+        if not _allowed_domain(match.group(1).lower())
     ]
+
+
+def _allowed_domain(domain: str) -> bool:
+    """An allowed domain or a subdomain of one; ``realexample.com`` is neither."""
+    return any(
+        domain == allowed or domain.endswith(f".{allowed}") for allowed in ALLOWED_EMAIL_DOMAINS
+    )
 
 
 def _addresses(text: str) -> list[str]:
@@ -115,15 +123,37 @@ def find_forbidden(text: str, forbidden: frozenset[str] = FORBIDDEN_SHA256) -> l
     ]
 
 
-def tracked_text_files() -> list[Path]:
-    """The files git tracks, without images and other binaries."""
+def tracked_files() -> list[Path]:
+    """The files git tracks."""
     listed = subprocess.run(
         ["git", "ls-files"],  # noqa: S607 - git from PATH, as every developer runs it
         capture_output=True,
         text=True,
         check=True,
     ).stdout.splitlines()
-    return [Path(name) for name in listed if Path(name).suffix.lower() not in BINARY_SUFFIXES]
+    return [Path(name) for name in listed]
+
+
+def tracked_text_files() -> list[Path]:
+    """The files git tracks, without images and other binaries."""
+    return [path for path in tracked_files() if path.suffix.lower() not in BINARY_SUFFIXES]
+
+
+@functools.cache
+def _published() -> frozenset[Path]:
+    """Every tracked file and every directory that holds one, as absolute paths."""
+    root = Path.cwd().resolve()
+    paths = set()
+    for path in tracked_files():
+        absolute = (root / path).resolve()
+        paths.add(absolute)
+        paths.update(parent for parent in absolute.parents if root in (parent, *parent.parents))
+    return frozenset(paths)
+
+
+def is_tracked(path: Path) -> bool:
+    """True if ``path`` is a tracked file, or a directory with one: what a clone would have."""
+    return path.resolve() in _published()
 
 
 def scan_history() -> list[str]:

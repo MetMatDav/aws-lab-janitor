@@ -30,6 +30,10 @@ everyone but the account root and denies writes to everyone but the detector.
   re-verification and skipped, with the reason recorded.
 - A run can wait three days. Step Functions Standard charges per state
   transition, not per second, so waiting costs nothing.
+- Plans are kept, not kept forever: a plan expires after 400 days and a
+  replaced version of one after 30. Only the detector can write a plan; if its
+  code were changed to write one again under the same key, the earlier version
+  would be gone 30 days later.
 - The approval is good for one hour once given ([0013](0013-an-approval-is-good-for-one-hour.md)).
 - Rejected: a single Lambda with a "confirm" flag (no waiting, no record), and
   Express workflows (five minutes at most).

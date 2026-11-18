@@ -21,6 +21,8 @@ def test_no_forbidden_token_in_tracked_files():
         "account " + "9999" + "88887777" + " here",
         "bucket cdk-assets-" + "9999" + "88887777" + "-us-east-1",
         "write to someone@" + "mailbox.test",
+        "write to someone@real" + "example.com",
+        "write to someone@not" + "github.com",
         "from " + ".".join(["8", "8", "8", "8"]),
         "cd /home/" + "someone/project",
         "cd /Users/" + "someone/project",

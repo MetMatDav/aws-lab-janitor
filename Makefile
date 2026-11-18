@@ -20,6 +20,11 @@ fmt:
 test:
 	pytest -q
 
+# app.py needs an account and a region to synthesize. With credentials the CDK
+# CLI provides them; without, these placeholders do, so synth and nag run offline.
+synth nag: export CDK_DEFAULT_ACCOUNT ?= 123456789012
+synth nag: export CDK_DEFAULT_REGION ?= us-east-1
+
 synth:
 	npx cdk synth --quiet -c reportEmail=$${JANITOR_REPORT_EMAIL:-ci@example.com}
 

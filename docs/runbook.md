@@ -29,7 +29,9 @@ is the mailbox that receives the reports and alerts.
   (`cdk-*-deploy-role`, `cdk-*-file-publishing-role` and the like). An
   administrator or power-user permission set is enough.
 - The account must have a `CDKToolkit` bootstrap stack. If it does not, run
-  `npx cdk bootstrap` once for the account and region.
+  `npx cdk bootstrap aws://<account-id>/us-east-1` once, after `make install`.
+  With the account and region named, the CLI does not need to synthesize the
+  app, which would stop to ask for `reportEmail`.
 
 ## CloudTrail
 
@@ -563,8 +565,9 @@ deletions disabled. Decoy `LAB-decoy-plan3`, deleted by hand afterwards.
   with both emails delivered. `ApprovalsUndelivered` did not change state.
   Both alarms were removed after this rehearsal; see [Alarms](#alarms).
 
-Not exercised: the expiry path (pending, see above), the IAM route, and a
-`POST` on a decided approval (seen on 2026-11-11).
+Not exercised then: the expiry path, the IAM route, and a `POST` on a decided
+approval (seen on 2026-11-11). The approval left pending did expire on
+2026-11-14: `docs/evidence/expiry-2026-11-14.md`.
 
 ### Cutover record: 2026-11-12
 
@@ -577,7 +580,16 @@ Not exercised: the expiry path (pending, see above), the IAM route, and a
 - 19:53 to 20:01 UTC: controlled deletion test with decoys, the first
   deletion by this stack. Three decoys deleted after approval, a keep-tagged snapshot left
   alone. Record: `docs/evidence/controlled-deletion-2026-11-12.md`.
-- The old stack, now report-only, is destroyed next.
+- 20:08 UTC: the old stack was destroyed. At 20:14 this stack was redeployed
+  without `-c reservedConcurrency=false`, the account's Lambda quota having
+  been raised: the detector and the executor each reserve one execution.
+- 2026-11-14 20:39 UTC: the approval of run `20261111T203848Z-138c`, left
+  unanswered, expired. Record: `docs/evidence/expiry-2026-11-14.md`.
+- 2026-11-16 14:00 UTC: the first scheduled run with deletions armed, run
+  `20261116T140037Z-4558`. Started by the schedule with
+  `{"dryRun":false,"minAgeDays":7}`, 25 seconds, no candidates, so it went
+  through `NotifyReportOnly` and the report was delivered. The four alarms
+  were `OK` and had not changed state since 2026-11-13.
 
 ## Pause and resume
 

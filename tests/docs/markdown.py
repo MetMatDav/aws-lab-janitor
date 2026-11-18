@@ -9,6 +9,7 @@ _LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 _NOT_IN_A_SLUG = re.compile(r"[^\w\- ]")
+_EDGE = re.compile(r"^\s*(\[\*\]|\w+)\s*-->\s*(\[\*\]|\w+)\s*(?::.*)?$")
 
 
 def _prose_lines(text: str) -> list[str]:
@@ -74,3 +75,13 @@ def tables(text: str, heading: str) -> list[list[str]]:
 def mermaid_blocks(text: str) -> list[str]:
     """The source of every ```mermaid block."""
     return [block.strip("\n") for block in re.findall(r"```mermaid\n(.*?)```", text, re.DOTALL)]
+
+
+def state_edges(diagram: str) -> set[tuple[str, str]]:
+    """Every ``A --> B`` of a Mermaid state diagram; the start and end marker is ``*``."""
+    edges = set()
+    for line in diagram.splitlines():
+        match = _EDGE.match(line)
+        if match:
+            edges.add(tuple("*" if end == "[*]" else end for end in match.groups()))
+    return edges

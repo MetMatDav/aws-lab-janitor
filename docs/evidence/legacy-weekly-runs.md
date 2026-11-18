@@ -9,9 +9,9 @@ sixteen scheduled runs that followed, nothing in the account carried the lab
 marks, so nothing was deleted. Its snapshot, volume and address deletions never
 ran.
 
-Its stack is gone. What is left is the log group the stack was told to keep,
-and this table is read from the `REPORT` line Lambda writes at the end of every
-invocation. All times are UTC; 14:00 UTC is 09:00 in Bogota.
+Its stack is gone, and so is the log group the stack was told to keep, deleted
+once this table had been read from it: from the `REPORT` line Lambda writes at
+the end of every invocation. All times are UTC; 14:00 UTC is 09:00 in Bogota.
 
 ## Scheduled runs
 
@@ -34,6 +34,8 @@ invocation. All times are UTC; 14:00 UTC is 09:00 in Bogota.
 | 2026-11-02 | 14:00 | 23.7 | 221 |
 | 2026-11-09 | 14:00 | 21.6 | 216 |
 
+![Invocations, errors and duration of the first janitor](legacy-weekly-runs.png)
+
 Sixteen consecutive Mondays, none missed, none failed. Durations between 21.5
 and 26.2 seconds; memory between 216 and 227 MB of the 512 MB configured.
 
@@ -51,6 +53,10 @@ Eight invocations by hand on 2026-07-26, while the function was being built:
 | 21:15 | 17.5 | 224 | |
 | 21:43 | 25.4 | 220 | |
 | 21:44 | 21.6 | 225 | deleted the self-test dashboard |
+
+The function's metrics count three errors that day, the left edge of the
+graph. The logs that would say which invocations they were are gone; the three
+rows where memory reached its limit are the likely ones.
 
 The comments of that version give the cause of the first three rows: each
 thread created its own session, and botocore loads every service model once

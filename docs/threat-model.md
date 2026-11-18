@@ -72,13 +72,16 @@ control, with the role it has today.
 
 | Role | What it may do | Worst case |
 | ---- | -------------- | ---------- |
-| Detector | Describe and list calls in every region; write objects under `plans/`; put items under `RUN#`; query the `by-resource` index | Write a false plan and false findings. A false plan still has to be approved by the owner, and the executor still re-checks every item against its live state and IAM still refuses anything not lab-marked. It can read the inventory of the account. It cannot read approval records |
+| Detector | Describe and list calls in every region; write objects under `plans/`; put items under `RUN#`; query the `by-resource` index | Write a false plan and false findings, and replace audit items of earlier runs (see [The record](#the-record)). A false plan still has to be approved by the owner, the executor still re-checks every item against its live state, and IAM still refuses anything not lab-marked. It can read the inventory of the account. It cannot read approval records |
 | Notifier | Read plans; publish to the reports and approvals topics; list their subscriptions; put and update items under `APPROVAL#` | Send the owner a misleading email, including a real approval link for a plan described falsely. Rewrite an approval record, including its status. It cannot resume an execution or invoke the executor, so a record it marks approved applies nothing by itself |
 | Approval handler | Get and update items under `APPROVAL#`; `SendTaskSuccess` and `SendTaskFailure` on any task token | Approve any pending plan: it is the component that approves. What that deletes is bounded by the executor's checks and locks. The callback actions have no resource-level permissions, so with a token of another workflow in the account it could complete that task; it only ever reads tokens from approval records |
-| Executor | Delete snapshots, volumes and addresses that carry the lab tag; delete dashboards and monitors named with the lab prefix; never anything with the keep tag; describe calls; read plans; put items under `RUN#`; get items under `APPROVAL#`; put events on the default bus | Delete every lab-marked snapshot, volume (EC2 itself refuses one that is attached), address, dashboard and monitor in the allowed regions, plan or no plan. Nothing else: no instance, database, bucket, cache or load balancer action exists in any role. It can read a task token and cannot use it |
-| Weekly state machine | Invoke the detector, the notifier and the executor; publish to the alerts topic; start the reminder machine; put items under `RUN#`; update items under `APPROVAL#` | Invoke the executor with an input of its choice. The executor still demands an approval record that reads approved, decided within the hour, for that run and that plan hash, and this role can write such a record. This is the role to protect: only the schedule and an administrator can start it, and its definition is fixed at deploy time |
-| Reminder state machine | Invoke the notifier | Send reminder emails |
+| Executor | Delete snapshots, volumes and addresses that carry the lab tag; delete dashboards, and deactivate and delete monitors, named with the lab prefix; never anything with the keep tag; describe calls; read plans; put items under `RUN#`; get items under `APPROVAL#`; put events on the default bus | Delete every lab-marked snapshot, volume (EC2 itself refuses one that is attached), address, dashboard and monitor in the allowed regions, plan or no plan, and replace audit items. Nothing else: no role holds an action that deletes or stops an instance, a database, a bucket, a cache or a load balancer. It can read a task token and cannot use it |
+| Weekly state machine | Invoke the detector, the notifier and the executor; publish to the alerts topic; start the reminder machine; put items under `RUN#`; update items under `APPROVAL#`; the log-delivery actions Step Functions needs for its own logging, on any resource | Invoke the executor with an input of its choice. The executor still demands an approval record that reads approved, decided within the hour, for that run and that plan hash, and this role can write such a record. It can also replace audit items, and create, change or delete log deliveries in the account. This is the role to protect. Its definition is fixed at deploy time, and whoever can only start an execution chooses two values, `dryRun` and `minAgeDays` |
+| Reminder state machine | Invoke the notifier | Invoke the notifier with a payload of its choice: send email in any of its modes, and create an approval record or replace the stored task token of a pending one. It cannot resume an execution |
 | Scheduler role | Start the weekly state machine; send to the dead-letter queue | Start extra runs. Each still needs an approval |
+
+Every function also carries the AWS managed policy that lets it write its own
+logs.
 
 Two things follow. The executor's IAM lock is the last line and it holds
 whatever the other components do: the worst loss is lab-marked leftovers. And
@@ -114,13 +117,20 @@ the plan it was pointed at, and checks that plan's hash against the approval.
 Tamper-evident, not tamper-proof.
 
 - Run events are written once: a conditional put that fails if the item
-  exists. No role may delete an item, and each role can write only its own
-  partition (`RUN#` or `APPROVAL#`).
+  exists. That is a guarantee of code, like "is in the approved plan". IAM
+  confines each function to one partition (`RUN#` or `APPROVAL#`; the weekly
+  state machine writes to both) and lets no role delete an item, but it cannot
+  require the condition: a role that may put items under `RUN#` could replace
+  one if its code were changed.
 - Plans are versions in a versioned bucket. The bucket policy denies deletion
   to everyone but the account root and writes to everyone but the detector.
   The executor reads the exact version that was approved and compares its hash.
+- Nothing is kept forever. A plan expires after 400 days and a replaced
+  version of one after 30. An approval record is removed 30 days after it
+  expires; its outcome stays in the items of the run.
 - CloudTrail records every read and write of the plans and of the table, by
-  key. It is kept by AWS in a bucket the janitor's roles cannot write.
+  key, unless the stack was deployed with `createTrail=none`. It delivers them
+  to a bucket of this stack that only the trail may write.
 - An administrator can still change a policy, a lifecycle rule or the table.
   CloudTrail shows that they did. S3 Object Lock would be the next step for
   the plans.
@@ -159,7 +169,9 @@ coming back.
   writing their records (sections 2 and 3). They fail safe.
 - The keep tag must match exactly; a mistyped one protects nothing.
 - Not exercised against live AWS: the IAM approval route, the address and
-  monitor deleters, the refusal to publish without a subscriber.
+  monitor deleters, the refusal to publish without a subscriber, and the IAM
+  denies themselves, which were simulated against the policy engine and never
+  seen on a live call.
 - Not attacked by the adversarial pass: live AWS behaviour (which characters a
   tag accepts, how API Gateway decodes headers), the semantics of a Step
   Functions redrive, the other detectors, the reminder flow.

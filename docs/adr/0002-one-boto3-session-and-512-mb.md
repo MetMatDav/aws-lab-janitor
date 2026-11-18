@@ -18,7 +18,7 @@ proportion to memory.
 One `boto3.Session` per invocation and one client per service and region, kept
 in a cache guarded by a lock so two threads never build the same client. Every
 client shares one configuration: connect timeout 5 seconds, read timeout 20,
-standard retries with three attempts. The detector and the executor get 512 MB;
+standard retries, three at most. The detector and the executor get 512 MB;
 the notifier and the approval handler, which make a handful of calls, get 256.
 
 ## Consequences

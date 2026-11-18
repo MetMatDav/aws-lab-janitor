@@ -20,20 +20,23 @@ Retries are bounded at each layer and whatever is given up on lands in one
 queue. EventBridge Scheduler tries to start the execution twice more within one
 hour, then sends the event to the dead-letter queue. Inside the run, each
 Lambda task is retried by Step Functions only for what a retry can fix: Lambda
-service errors and throttling (30 seconds, doubling, five attempts). An error
+service errors (2 seconds, doubling, six attempts) and throttling (30 seconds,
+doubling, five attempts). An error
 raised by the function's own code is not retried; it is caught and sent to the
 alerts topic. The same queue receives an email that SNS could not deliver, from
 the redrive policy of each of the three subscriptions.
 
 ## Consequences
 
-- A run happens at most once per schedule tick, and a failure is visible within
-  the hour instead of the next day.
+- The schedule gives up on a start within the hour, and the failure is visible
+  then instead of the next day. Scheduler delivers at least once, so a second
+  start for one tick is possible in principle; each run is independent and
+  needs its own approval.
 - One queue and one alarm cover three sources. The cost is that the alarm says
   "something is in the queue", not what: the runbook explains how to read the
   message and tell a failed start from a failed email.
 - boto3 calls inside the functions keep their own bounded retries (standard
-  mode, three attempts), so one AWS call can take three tries; the sweep's time
+  mode, up to three), so one AWS call can take four tries; the sweep's time
   budget accounts for that.
 - Rejected: a dead-letter queue per source. Three queues and three alarms for
   events that should never happen.

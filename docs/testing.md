@@ -37,7 +37,8 @@ make nag         # cdk synth with cdk-nag, strict
 make simulate    # the IAM simulation; needs AWS credentials
 ```
 
-`cdk synth` and `make test` need no AWS credentials. The property tests run 100
+`make test`, `make synth` and `make nag` need no AWS credentials: without them
+the Makefile supplies a placeholder account and region. The property tests run 100
 examples each by default and 300, derandomized, with `HYPOTHESIS_PROFILE=ci`,
 which is what CI uses so that a failure can be reproduced.
 
@@ -76,16 +77,29 @@ live, in the owner's account:
 | 2026-11-12 | A wrong confirmation code, then a rejection; CloudTrail data events | [runbook](runbook.md#operational-rehearsal-record-2026-11-11-and-2026-11-12) |
 | 2026-11-12 | A false alarm on a delivered email, which changed the design | [ADR 0012](adr/0012-refuse-to-publish-instead-of-alarming-on-delivery.md) |
 | 2026-11-12 | A real deletion: three decoys approved and deleted, a keep-tagged one left alone | [evidence/controlled-deletion-2026-11-12.md](evidence/controlled-deletion-2026-11-12.md) |
+| 2026-11-14 | An approval nobody answered expiring after 72 hours | [evidence/expiry-2026-11-14.md](evidence/expiry-2026-11-14.md) |
+| 2026-11-16 | The first scheduled run with deletions armed: started by the schedule, nothing to delete, report delivered | [runbook](runbook.md#cutover-record-2026-11-12) |
 
 ## What never ran live
 
 Covered by tests against recorded responses only:
 
 - The approval route authenticated with IAM.
-- The expiry of an approval after 72 hours.
+- The IAM half of the double lock. The executor's policy was simulated against
+  the policy engine, with the tags supplied by the simulation; no live call by
+  the executor has been seen denied, because the code has never asked for a
+  resource it should not.
 - Releasing an Elastic IP and deleting an Internet Monitor monitor.
+- A reminder email after a real wait of 60 hours. The reminder was sent once
+  from an execution started by hand with a wait of five seconds; the two that
+  waited their 60 hours found the approval already decided and sent nothing.
+- The dead-letter queue. No start by the schedule and no email delivery is
+  known to have failed, so the path from a failure to the queue and its alarm
+  was never exercised.
 - The notifier refusing to publish to a topic without a confirmed subscriber.
 - A decision whose outcome is unknown (`504`) and the manual reset that follows.
 - The executor running out of its time budget.
 - The minimum age rule on a real resource: the controlled deletion ran with a
   minimum age of zero.
+- The quickstart of the README from a fresh account. The author's account was
+  deployed with the same commands and its own settings.

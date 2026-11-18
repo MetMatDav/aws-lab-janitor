@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.docs import markdown
+from tests.docs import hygiene, markdown
 
 DOCUMENTS = [Path("README.md"), *sorted(Path("docs").rglob("*.md"))]
 
@@ -14,6 +14,8 @@ def test_relative_links_and_anchors_resolve(document):
     for target, anchor in markdown.links(document):
         destination = (document.parent / target).resolve() if target else document.resolve()
         assert destination.exists(), f"{document}: {target}"
+        # A file git does not track is on this disk and not on GitHub.
+        assert hygiene.is_tracked(destination), f"{document}: {target} is not tracked"
         if anchor and destination.suffix == ".md":
             assert anchor in markdown.anchors(destination), f"{document}: {target}#{anchor}"
 
@@ -49,3 +51,10 @@ def test_tables_and_mermaid_blocks():
     assert markdown.tables(text, "What it detects") == [["`ebs-volume`", "tag"], ["`ami`", "tag"]]
     assert markdown.tables(text, "Missing") == []
     assert markdown.mermaid_blocks(text) == ["stateDiagram-v2\n  Detect --> Apply"]
+
+
+def test_only_tracked_files_and_their_directories_count_as_published(tmp_path):
+    assert hygiene.is_tracked(Path("README.md").resolve())
+    assert hygiene.is_tracked(Path("docs/adr").resolve())
+    assert not hygiene.is_tracked(Path(".venv").resolve())
+    assert not hygiene.is_tracked(tmp_path / "elsewhere.md")

@@ -16,9 +16,9 @@ looking like a report.
 
 Three SNS topics: reports (the weekly report and the outcome of each run),
 approvals (requests and reminders) and alerts (alarms and failed runs). Only
-the notifier function may publish to the first two; the approvals topic also
-refuses new subscriptions from anyone but the deployment role and the account
-root. A run that fails sends its own alert from a `NotifyFailure` state. An
+the notifier's role is granted publishing to the first two. The approvals topic
+goes further: its own policy denies publishing to every other principal, and
+new subscriptions to anyone but the deployment role and the account root. A run that fails sends its own alert from a `NotifyFailure` state. An
 alarm on failed and timed-out executions stays as a backstop for failures that
 never reach that state.
 

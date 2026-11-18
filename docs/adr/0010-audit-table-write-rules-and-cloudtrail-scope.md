@@ -14,7 +14,10 @@ little: someone outside it has to keep one too.
 ## Decision
 
 Every event of a run is written with a conditional put that fails if the item
-exists, so no role can overwrite history; no role may delete items. Run events
+exists, so the janitor never overwrites its own history, and no role may delete
+items. That condition is in each request, not in IAM, which cannot require it:
+a role allowed to put items under `RUN#` could replace one if its code were
+changed, and CloudTrail would record the call. Run events
 live under `RUN#<runId>` and approval records under `APPROVAL#<id>`, and each
 role's grant is confined to one of the two with `dynamodb:LeadingKeys`. The
 only updates are the status changes of an approval record, each conditional on
@@ -34,6 +37,10 @@ management events) or none.
 - The deletions themselves are management events. They are in the account's
   event history for 90 days with no trail at all, under the executor's name.
 - Data events are billed per event. A weekly run produces a few dozen.
+- Approval records are removed by DynamoDB 30 days after they expire. The
+  mirror item under the run, with the outcome and the approver, stays.
+- With `createTrail=none` there are no data events, and the table is the only
+  record of who read or wrote it.
 
 ## Where to look
 

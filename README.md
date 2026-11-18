@@ -8,7 +8,7 @@ Monday it sweeps all enabled regions, emails a report of what is costing
 money, and proposes a plan to delete the leftovers you marked as lab. Nothing
 is deleted until you approve that specific plan, and what it can delete at all
 is fixed by IAM: snapshots, unattached volumes, idle addresses, dashboards and
-monitors. Never an instance, a database or a bucket.
+Internet Monitor monitors. Never an instance, a database or a bucket.
 
 It runs in its author's account. On 2026-11-12 it deleted its first three
 resources, decoys made for the purpose, after an approval by email, and left a
@@ -20,7 +20,7 @@ this repository.
 
 ```mermaid
 flowchart LR
-    schedule[EventBridge Scheduler<br/>Mondays 09:00] --> machine[Step Functions<br/>weekly state machine]
+    schedule[EventBridge Scheduler<br/>Mondays 09:00, America/Bogota by default] --> machine[Step Functions<br/>weekly state machine]
     machine --> detector[Detector Lambda<br/>read-only sweep]
     machine --> notifier[Notifier Lambda]
     machine --> executor[Executor Lambda<br/>lab-locked deletes]
@@ -99,24 +99,27 @@ And each resource passes a **double lock**. The code selects it: it carries the
 lab mark, it does not carry `janitor=keep`, and the executor reads its live
 state again right before deleting. IAM agrees independently: the executor's
 role may delete only resources tagged `Purpose=lab` or named `LAB-...`, with an
-explicit deny on anything tagged `janitor=keep`. A bug in the code ends in
-`AccessDenied`, not in a deletion. The policy was checked against the IAM
-policy engine, [22 simulated calls](docs/evidence/iam-simulation.txt).
+explicit deny on anything tagged `janitor=keep`. A bug that picks a resource
+without the lab mark, or one with the keep tag, ends in `AccessDenied`, not in
+a deletion. The policy was checked against the IAM policy engine,
+[22 simulated calls](docs/evidence/iam-simulation.txt); it has not yet been
+seen denying a live call.
 
 ## What it detects
 
 A resource counts as lab when its name starts with `LAB-` or it carries the tag
 `Purpose=lab`. Everything below is reported whether it is lab or not, with an
 estimated monthly cost where the price is fixed per hour or per gigabyte
-(us-east-1 on-demand prices, dated in the report).
+(us-east-1 on-demand prices, dated in the plan). The janitor's own resources
+and the CDK's bootstrap buckets are left out.
 
 | Kind | What | Cost estimate |
 | ---- | ---- | ------------- |
 | `ec2-instance` | EC2 instance | no |
-| `public-ipv4` | Public IPv4 address of an instance | yes |
+| `public-ipv4` | Auto-assigned public IPv4 addresses, counted per region | yes |
 | `nat-gateway` | NAT gateway | yes |
 | `elastic-ip` | Elastic IP address | yes |
-| `ebs-volume` | EBS volume | yes |
+| `ebs-volume` | EBS volume that is not attached | yes |
 | `ebs-snapshot` | EBS snapshot | yes |
 | `ami` | Machine image | no |
 | `vpc-endpoint` | Interface VPC endpoint | yes |
@@ -159,20 +162,21 @@ A resource tagged `janitor=keep` is never proposed. The tag must match exactly:
 | `nat-gateway` | Removing it changes the routing of a network |
 | `vpc-endpoint` | Removing it changes the routing of a network |
 | `cloudfront` | Serves traffic |
-| `public-ipv4` | Belongs to an instance |
+| `public-ipv4` | Belongs to a network interface that is in use |
 
-These are reported with their cost so that you delete them yourself, knowing
-what they are. This is not a setting: the permissions do not exist
+These are reported, with a cost estimate where the price is fixed, so that you
+delete them yourself, knowing what they are. This is not a setting: the permissions do not exist
 ([ADR 0006](docs/adr/0006-never-delete-compute-or-data.md)).
 
 ## Try it in dry-run
 
-You need Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22, and an AWS
-account bootstrapped for the CDK (`npx cdk bootstrap`).
+You need Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22 and an AWS
+account. Replace `ACCOUNT_ID`, the profile and the address:
 
 ```
 make install
 export AWS_PROFILE=your-profile AWS_REGION=us-east-1 PATH="$PWD/.venv/bin:$PATH"
+npx cdk bootstrap aws://ACCOUNT_ID/us-east-1    # once per account and region
 npx cdk deploy LabJanitorStack --require-approval broadening \
   -c reportEmail=you@example.com -c reservedConcurrency=false
 ```
@@ -189,6 +193,13 @@ A report arrives by email in about half a minute. Nothing can be deleted in
 this state. To arm it, redeploy with `-c dryRun=false`; from then on the Monday
 run asks for your approval when it finds something.
 
+Three things to know before you deploy. By default the stack creates its own
+CloudTrail trail with management events; in an account that already has a
+trail, add `-c createTrail=dataEventsOnly` so you do not pay for a second copy.
+The heartbeat alarm of a new stack fires once, until the first run. And
+`cdk destroy` keeps the plans bucket, the trail's log bucket and the audit
+table: they are the record.
+
 `-c reservedConcurrency=false` is for new accounts, whose Lambda concurrency
 quota is too small to reserve any. The [runbook](docs/runbook.md) covers the
 rest: every setting, approving and rejecting, what each alarm means, pausing,
@@ -196,8 +207,9 @@ CloudTrail, troubleshooting.
 
 ## What it costs
 
-About 50 cents a month, at one run a week in us-east-1, before any free tier
-(prices read from the AWS price list on 2026-11-12):
+About 50 cents a month, at one run a week in us-east-1 with
+`createTrail=dataEventsOnly`, before any free tier (prices read from the AWS
+price list on 2026-11-12):
 
 - Four CloudWatch alarms watching five metrics, at $0.10 per metric: $0.50.
 - Lambda: about 25 seconds a week at 512 MB on arm64, less than a tenth of a
@@ -220,6 +232,10 @@ One NAT gateway left running costs $32.85 a month.
   email, found in a rehearsal, and
   [the design change](docs/adr/0012-refuse-to-publish-instead-of-alarming-on-delivery.md)
   it caused.
+- [An approval nobody answered](docs/evidence/expiry-2026-11-14.md): it
+  expired after 72 hours and nothing was deleted.
+- The first scheduled run with deletions armed, on Monday 2026-11-16: it
+  started by itself, found nothing to delete and emailed its report.
 - Rehearsals of approval, rejection, a wrong code, the reminder and a failed
   run, recorded in the [runbook](docs/runbook.md#dress-rehearsal-with-deletions-disabled).
 
@@ -248,9 +264,12 @@ including what never ran against a real account.
   change it would take: the approval id can be read by anyone who can read the
   audit trail of the account, and the detector and the executor run out of time
   with thousands of resources. [docs/known-limitations.md](docs/known-limitations.md).
-- **Not everything has run live.** The approval route authenticated with IAM,
-  the expiry of an approval, and the deletion of addresses and monitors are
-  covered by tests against recorded responses only.
+- **Not everything has run live.** The approval route authenticated with IAM
+  and the deletion of addresses and monitors are covered by tests against
+  recorded responses only. The IAM half of the double lock was simulated
+  against the policy engine and never seen denying a live call. The quickstart
+  above has not been repeated from a fresh account.
+  [The full list](docs/testing.md#what-never-ran-live).
 - **Costs are estimates** from a price table for us-east-1, not from Cost
   Explorer, and only for resources with a fixed hourly or per-gigabyte price.
 - The [threat model](docs/threat-model.md) says what each component could do
