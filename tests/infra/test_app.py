@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from aws_cdk import cx_api
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -39,8 +38,14 @@ def test_app_requires_account_and_region(env: dict[str, str], missing: str):
 
 
 def test_stack_artifact_carries_stack_tags(cli_assembly: Path):
-    artifact = cx_api.CloudAssembly(str(cli_assembly)).get_stack_by_name("LabJanitorStack")
-    assert artifact.tags == {"Project": "aws-lab-janitor", "ManagedBy": "cdk"}
+    # Read from the manifest, as the CLI does, not through cx_api.CloudAssembly:
+    # aws-cdk-lib and the standalone cloud-assembly-schema package both install
+    # aws_cdk/cloud_assembly_schema, and when the standalone copy lands last
+    # (the order depends on the installer) the loader rejects its own options.
+    manifest = json.loads((cli_assembly / "manifest.json").read_text())
+    artifact = manifest["artifacts"]["LabJanitorStack"]
+    assert artifact["type"] == "aws:cloudformation:stack"
+    assert artifact["properties"]["tags"] == {"Project": "aws-lab-janitor", "ManagedBy": "cdk"}
 
 
 def test_resources_keep_the_project_tags(cli_template: dict):
